@@ -1,0 +1,10 @@
+.build/
+*.app/
+.DS_Store
+.swiftpm/
+bench-*.log
+bench-run.log
+startup-*.log
+diag.log
+build-icon/
+*.bc
