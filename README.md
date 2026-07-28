@@ -148,6 +148,17 @@ nào phình**. Nó tách riêng app / GPU / Networking / WebContent, đếm số
 Δ so với mẫu đầu. Tự tra lại PID nếu app bị relaunch (và reset mốc Δ, vì process mới
 không so được với process cũ).
 
+Hai cột quan trọng:
+
+- **RECLAIM** — phần OS lấy lại được khi cần. Đây là thứ phân biệt **cache với leak** ngay
+  trong lúc đo, không cần chạy `pressure-test.sh`. Ví dụ WebContent 585 MB / reclaim
+  351 MB nghĩa là 60% chỉ là cache.
+- **PEAK** — mức cao nhất từ lúc process sinh ra (chỉ ở snapshot mode).
+
+Số lấy từ `/usr/bin/footprint --json`, đọc bằng `plutil` nên **chính xác tới byte** và
+không cần python. Bản trước parse text của `vmmap`, trên 1 GB nó in `"1.4G"` nên độ phân
+giải rơi xuống 100 MB — hai mẫu liên tiếp cùng đọc `1024.0 MB` từng che mất thay đổi thật.
+
 Số liệu nghiêm túc để so phương án thì dùng `./bench.sh` với giao thức cố định —
 xem `docs/perf-process.md`.
 
