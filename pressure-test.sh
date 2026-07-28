@@ -9,6 +9,14 @@
 # Dùng `memory_pressure -S` = SIMULATE, không cấp phát RAM thật.
 # (`memory_pressure -l warn` mà thiếu -S sẽ ăn nhiều GB RAM thật → không dùng.)
 # Trap reset sysctl về normal kể cả khi Ctrl-C, để máy không kẹt ở pressure.
+# HẠN CHẾ ĐÃ BIẾT (chưa sửa — measure.sh đã sửa, script này chưa):
+#   1. Parse text `vmmap` nên trên 1 GB độ phân giải chỉ 100 MB. Dòng "1.2G" giữ nguyên
+#      qua các mốc KHÔNG chứng minh được là không giảm.
+#   2. Attribution dùng "WebKit process trẻ hơn app" nên gom cả WebContent của app khác
+#      (Safari/Slack). Trên máy nhiều app WebKit, process "bị kill" có thể không phải của app.
+# Muốn kết quả tin được: chuyển sang `footprint --json` + attribution qua unified log,
+# giống measure.sh.
+
 set -uo pipefail
 cd "$(dirname "$0")"
 
