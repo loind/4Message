@@ -7,8 +7,13 @@ import WebKit
 /// Không tính được phần dyld load trước `main` — phần đó đo từ shell (`startup.sh`).
 let launchClock = Date()
 
-/// Host được phép mở trong app; còn lại đẩy sang browser mặc định.
-let internalHosts = ["messenger.com", "facebook.com", "fbcdn.net", "fb.com", "m.me"]
+/// Host được phép LOAD trong app (hợp của mọi service, cộng CDN và domain login).
+/// Khác với `isSurface` — cái đó quyết định link user CLICK có ở lại trong app không.
+let internalHosts = [
+    "messenger.com", "facebook.com", "fbcdn.net", "fb.com", "m.me",
+    "instagram.com", "cdninstagram.com",
+    "threads.com", "threads.net",
+]
 
 /// Dùng surface Messenger trong facebook.com, không dùng messenger.com.
 /// Lý do: Meta ship tính năng mới (Meta AI) vào facebook.com trước, messenger.com bị
@@ -247,6 +252,9 @@ func currentVersionSummary() -> String {
         buildDate: s("FBMessBuildDate"),
         surface: messengerURL.absoluteString,
         mode: Mode.current.rawValue
+            + " services=" + resolveServices(info["__unused"] as? String
+                ?? ProcessInfo.processInfo.environment["FBMESS_SERVICES"]).map(\.id).joined(separator: "+")
+            + " topology=" + Topology.resolve(ProcessInfo.processInfo.environment["FBMESS_TOPOLOGY"]).rawValue
     )
 }
 
@@ -272,26 +280,8 @@ func isInternal(_ url: URL) -> Bool {
     return internalHosts.contains { host == $0 || host.hasSuffix("." + $0) }
 }
 
-/// Link user CLICK có được giữ trong app hay không — khác hẳn `isInternal`.
-///
-/// `isInternal` trả lời "host nào được phép LOAD", và buộc phải chứa cả `facebook.com`
-/// vì luồng login redirect qua đó. Dùng chính nó để quyết định link click là sai: mọi
-/// link facebook.com trong tin nhắn (post, ảnh, page, reel) sẽ điều hướng app rời khỏi
-/// Messenger, và app không có đường về nên trông như bị treo.
-///
-/// Hàm này chỉ nhận đúng surface Messenger.
-func isMessengerSurface(_ url: URL) -> Bool {
-    guard let host = url.host?.lowercased() else { return false }
-    let matches = { (domain: String) in host == domain || host.hasSuffix("." + domain) }
-
-    if matches("messenger.com") || matches("m.me") { return true }
-    if matches("facebook.com") {
-        let path = url.path
-        // Khớp chính xác `/messages` hoặc có `/` sau — để `/messagesfake` không lọt.
-        return path == "/messages" || path.hasPrefix("/messages/")
-    }
-    return false
-}
+// `isSurface(_:of:)` nằm ở Services.swift — nó cần biết service nào nên không thể là
+// hàm global không tham số như bản `isMessengerSurface` cũ.
 
 /// Dùng `fatalError` chứ KHÔNG dùng `precondition`/`assert`: `-Ounchecked` xoá cả hai,
 /// khiến selftest luôn "pass" dù logic sai. `fatalError` sống sót mọi mức tối ưu.
@@ -317,18 +307,36 @@ func runSelftest() {
     check(!isInternal(URL(string: "mailto:a@b.c")!), "scheme không có host")
 
     // Link click: chỉ surface Messenger được ở lại trong app.
-    check(isMessengerSurface(URL(string: "https://www.facebook.com/messages/")!), "fb /messages/")
-    check(isMessengerSurface(URL(string: "https://www.facebook.com/messages")!), "fb /messages")
-    check(isMessengerSurface(URL(string: "https://www.facebook.com/messages/e2ee/t/1")!), "fb thread")
-    check(isMessengerSurface(URL(string: "https://www.messenger.com/t/1")!), "messenger.com")
-    check(isMessengerSurface(URL(string: "https://m.me/abc")!), "m.me")
-    // Đây là bug đã gây treo: link content facebook.com phải ra browser.
-    check(!isMessengerSurface(URL(string: "https://www.facebook.com/facebook")!), "fb page → browser")
-    check(!isMessengerSurface(URL(string: "https://www.facebook.com/photo/?fbid=1")!), "fb photo → browser")
-    check(!isMessengerSurface(URL(string: "https://www.facebook.com/reel/1")!), "fb reel → browser")
-    check(!isMessengerSurface(URL(string: "https://www.facebook.com/messagesfake")!), "prefix giả không lọt")
-    check(!isMessengerSurface(URL(string: "https://evil-facebook.com/messages/")!), "host giả mạo")
-    check(!isMessengerSurface(URL(string: "https://youtube.com/watch")!), "host ngoài")
+    let msg = knownServices[0], ig = knownServices[1], th = knownServices[2]
+    check(isSurface(URL(string: "https://www.facebook.com/messages/")!, of: msg), "fb /messages/")
+    check(isSurface(URL(string: "https://www.facebook.com/messages")!, of: msg), "fb /messages")
+    check(isSurface(URL(string: "https://www.facebook.com/messages/e2ee/t/1")!, of: msg), "fb thread")
+    check(isSurface(URL(string: "https://www.messenger.com/t/1")!, of: msg), "messenger.com")
+    check(isSurface(URL(string: "https://m.me/abc")!, of: msg), "m.me")
+    // Bug đã gây kẹt cửa sổ: link content facebook.com phải ra browser.
+    check(!isSurface(URL(string: "https://www.facebook.com/facebook")!, of: msg), "fb page → browser")
+    check(!isSurface(URL(string: "https://www.facebook.com/reel/1")!, of: msg), "fb reel → browser")
+    check(!isSurface(URL(string: "https://www.facebook.com/messagesfake")!, of: msg), "prefix giả không lọt")
+    check(!isSurface(URL(string: "https://evil-facebook.com/messages/")!, of: msg), "host giả mạo")
+    check(!isSurface(URL(string: "https://youtube.com/watch")!, of: msg), "host ngoài")
+
+    // Service không được nhận surface của service khác — nếu không, link Instagram
+    // sẽ mở trong cửa sổ Messenger.
+    check(isSurface(URL(string: "https://www.instagram.com/direct/inbox/")!, of: ig), "ig /direct")
+    check(!isSurface(URL(string: "https://www.instagram.com/explore/")!, of: ig), "ig explore → browser")
+    check(!isSurface(URL(string: "https://www.instagram.com/direct/")!, of: msg), "ig không thuộc messenger")
+    check(!isSurface(URL(string: "https://www.facebook.com/messages/")!, of: ig), "fb không thuộc instagram")
+    check(isSurface(URL(string: "https://www.threads.com/@x")!, of: th), "threads mọi path")
+
+    check(resolveServices(nil).map(\.id) == ["messenger"], "không set → chỉ messenger")
+    check(resolveServices("").map(\.id) == ["messenger"], "rỗng → chỉ messenger")
+    check(resolveServices("instagram,messenger").map(\.id) == ["instagram", "messenger"], "giữ thứ tự user")
+    check(resolveServices("messenger,messenger").map(\.id) == ["messenger"], "loại trùng")
+    check(resolveServices("nonsense").map(\.id) == ["messenger"], "id lạ → fallback")
+    check(resolveServices("nonsense,instagram").map(\.id) == ["instagram"], "bỏ id lạ, giữ id đúng")
+    check(Topology.resolve(nil) == .tabs, "topology default tabs")
+    check(Topology.resolve("windows") == .windows, "topology windows")
+    check(Topology.resolve("rác") == .tabs, "topology rác → tabs")
 
     check(jsString("a\"b") == "\"a\\\"b\"", "escape JS string")
 
@@ -374,12 +382,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
                          UNUserNotificationCenterDelegate {
 
     private let mode = Mode.current
+    private let services = resolveServices(ProcessInfo.processInfo.environment["FBMESS_SERVICES"])
+    private let topology = Topology.resolve(ProcessInfo.processInfo.environment["FBMESS_TOPOLOGY"])
+
+    /// Một service = một webview = một WebContent process (origin khác nhau).
+    private final class Runtime {
+        let service: Service
+        let webView: WKWebView
+        var window: NSWindow?               // chỉ dùng ở topology .windows
+        var titleObserver: NSKeyValueObservation?
+        init(service: Service, webView: WKWebView) { self.service = service; self.webView = webView }
+    }
+    private var runtimes: [Runtime] = []
+    private var activeIndex = 0
 
     private var window: NSWindow!
+    /// Trỏ tới webview của service đang active. Giữ tên cũ để phần lớn code delegate
+    /// không phải đổi khi lên multi-service.
     private var webView: WKWebView!
     private var statusItem: NSStatusItem!
     private var hotkey: Hotkey?
-    private var titleObserver: NSKeyValueObservation?
     private var activity: NSObjectProtocol?
     private var retryDelay: TimeInterval = 2
 
@@ -395,7 +417,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
                  + "block=\(mode.blocksTelemetryAndMedia) hideAfter=\(benchHideAfter)")
 
         buildMenu()
-        buildWindow()
+        buildUI()
         buildStatusItem()
 
         let center = UNUserNotificationCenter.current()
@@ -415,7 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             )
         }
 
-        loadMessenger()
+        loadAllServices()
 
         benchLog(String(format: "ready main_ms=%.1f epoch=%.3f",
                         Date().timeIntervalSince(launchClock) * 1000,
@@ -431,7 +453,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     // MARK: Setup
 
-    private func buildWindow() {
+    private var activeService: Service { runtimes[activeIndex].service }
+
+    private func service(for wv: WKWebView) -> Service {
+        runtimes.first { $0.webView === wv }?.service ?? services[0]
+    }
+
+    private func buildUI() {
+        runtimes = services.map { Runtime(service: $0, webView: makeWebView(for: $0)) }
+
+        for rt in runtimes {
+            rt.titleObserver = rt.webView.observe(\.title, options: [.new]) { [weak self] wv, _ in
+                self?.applyTitle(wv.title, from: wv)
+            }
+        }
+
+        switch topology {
+        case .tabs:
+            // 1 cửa sổ, webview không active thì DETACH — điều kiện để
+            // inactiveSchedulingPolicy có hiệu lực.
+            window = makeWindow(title: runtimes[0].service.title, autosave: "MessengerMain")
+            window.contentView = runtimes[0].webView
+            window.makeKeyAndOrderFront(nil)
+        case .windows:
+            // Mỗi service 1 cửa sổ. Cửa sổ bị che hoàn toàn thì macOS báo occluded và
+            // WebKit cũng dừng render — nên topology này chỉ khác .tabs khi các cửa sổ
+            // cùng nhìn thấy được.
+            for (i, rt) in runtimes.enumerated() {
+                let w = makeWindow(title: rt.service.title, autosave: "Window-\(rt.service.id)")
+                w.contentView = rt.webView
+                rt.window = w
+                if i == 0 { window = w }
+                w.makeKeyAndOrderFront(nil)
+            }
+        }
+
+        webView = runtimes[0].webView
+        activeIndex = 0
+    }
+
+    private func makeWindow(title: String, autosave: String) -> NSWindow {
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false)
+        w.title = title
+        w.minSize = NSSize(width: 420, height: 400)
+        w.delegate = self
+        w.setFrameAutosaveName(autosave)
+        if !w.setFrameUsingName(autosave) { w.center() }
+        return w
+    }
+
+    private func makeWebView(for service: Service) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = .default()  // persistent → login sống qua restart
 
@@ -446,43 +520,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         config.userContentController.addUserScript(
             WKUserScript(source: bridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )
-        // Kill switch: nếu selector khớp nhầm và app thành không dùng được thì
-        // `FBMESS_KEEP_FB_CHROME=1` để tắt, không cần rebuild.
-        if ProcessInfo.processInfo.environment["FBMESS_KEEP_FB_CHROME"] != "1" {
+        // CSS ẩn chrome viết riêng cho DOM của facebook.com — inject vào Instagram hay
+        // Threads là vô nghĩa, và selector `*:has(> input[...])` không nên chạy ở nơi
+        // chưa kiểm chứng. Mỗi service cần rule riêng, làm sau khi chốt topology.
+        if service.id == "messenger",
+           ProcessInfo.processInfo.environment["FBMESS_KEEP_FB_CHROME"] != "1" {
             config.userContentController.addUserScript(
                 WKUserScript(source: hideChromeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
             )
         }
 
-        webView = WKWebView(frame: .zero, configuration: config)
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
+        let wv = WKWebView(frame: .zero, configuration: config)
+        wv.navigationDelegate = self
+        wv.uiDelegate = self
         // Bật lại: nếu có navigation nào lọt qua luật link thì user vẫn thoát được,
         // không bị kẹt trên trang lạ.
-        webView.allowsBackForwardNavigationGestures = true
-
-        titleObserver = webView.observe(\.title, options: [.new]) { [weak self] webView, _ in
-            self?.applyTitle(webView.title)
-        }
-
-        window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Messenger"
-        window.minSize = NSSize(width: 420, height: 400)
-        window.contentView = webView
-        window.delegate = self
-        window.setFrameAutosaveName("MessengerMain")
-        if !window.setFrameUsingName("MessengerMain") { window.center() }
-        window.makeKeyAndOrderFront(nil)
+        wv.allowsBackForwardNavigationGestures = true
+        return wv
     }
 
-    private func loadMessenger() {
+    private func loadAllServices() {
         guard mode.blocksTelemetryAndMedia else {
-            webView.load(URLRequest(url: messengerURL))
+            for rt in runtimes { rt.webView.load(URLRequest(url: rt.service.url)) }
             return
         }
         WKContentRuleListStore.default().compileContentRuleList(
@@ -490,14 +549,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             encodedContentRuleList: blockRulesJSON
         ) { [weak self] list, error in
             guard let self else { return }
-            if let list {
-                self.webView.configuration.userContentController.add(list)
-                benchLog("content rule list đã áp dụng")
-            } else {
-                benchLog("content rule compile FAILED: \(String(describing: error))")
+            for rt in self.runtimes {
+                if let list { rt.webView.configuration.userContentController.add(list) }
+                rt.webView.load(URLRequest(url: rt.service.url))
             }
-            self.webView.load(URLRequest(url: messengerURL))
+            benchLog(list != nil ? "content rule list đã áp dụng"
+                                 : "content rule compile FAILED: \(String(describing: error))")
         }
+    }
+
+    /// Đổi service đang xem. Ở `.tabs` thì detach webview cũ khỏi view hierarchy —
+    /// đó là điều kiện để `inactiveSchedulingPolicy` có tác dụng.
+    @objc private func switchService(_ sender: NSMenuItem) {
+        select(index: sender.tag)
+    }
+
+    private func select(index: Int) {
+        guard index >= 0, index < runtimes.count else { return }
+        activeIndex = index
+        let rt = runtimes[index]
+        webView = rt.webView
+
+        switch topology {
+        case .tabs:
+            window.contentView = rt.webView
+            window.title = rt.webView.title ?? rt.service.title
+            window.makeKeyAndOrderFront(nil)
+        case .windows:
+            rt.window?.makeKeyAndOrderFront(nil)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        benchLog("switch → \(rt.service.id)")
     }
 
     private func buildStatusItem() {
@@ -512,7 +594,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     /// `document.title` của Messenger là nguồn duy nhất cho cả 3 chỗ: tiêu đề cửa sổ,
     /// badge dock, và số bên cạnh icon menu bar.
-    private func applyTitle(_ title: String?) {
+    private func applyTitle(_ title: String?, from source: WKWebView) {
+        // Ở .windows mỗi service có cửa sổ riêng → đặt title cho đúng cửa sổ đó,
+        // kể cả khi nó không phải service đang active.
+        if let rt = runtimes.first(where: { $0.webView === source }),
+           let own = rt.window, let title, !title.isEmpty {
+            own.title = title
+        }
+        // Badge dock/menu bar chỉ phản ánh service đang active — không lọc thì service
+        // ẩn sẽ ghi đè số của service đang xem.
+        guard source === webView else { return }
+
         let unread = unreadBadge(from: title)
 
         NSApp.dockTile.badgeLabel = unread
@@ -529,6 +621,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        if runtimes.count > 1 {
+            for (i, rt) in runtimes.enumerated() where i < 9 {
+                let item = NSMenuItem(title: rt.service.title,
+                                      action: #selector(switchService(_:)),
+                                      keyEquivalent: String(i + 1))
+                item.tag = i
+                appMenu.addItem(item)
+            }
+            appMenu.addItem(.separator())
+        }
         appMenu.addItem(withTitle: "Thông tin bản build…", action: #selector(showAbout), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Về trang Messenger", action: #selector(goHome), keyEquivalent: "H")
@@ -586,7 +688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     /// Lưới an toàn: `⌘R` chỉ reload URL hiện tại, nên nếu bị điều hướng ra trang lạ
     /// thì không có cách nào về Messenger. Menu này load lại start URL.
     @objc private func goHome() {
-        webView.load(URLRequest(url: messengerURL))
+        webView.load(URLRequest(url: activeService.url))
     }
 
     /// Xoá cache HTTP rồi tải lại.
@@ -607,6 +709,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func hide() {
+        if topology == .windows {
+            for rt in runtimes { rt.window?.orderOut(nil) }
+        }
         window.orderOut(nil)
         // Tháo webView khỏi view hierarchy để inactiveSchedulingPolicy có hiệu lực.
         if mode.detachesWhenHidden, window.contentView === webView {
@@ -618,6 +723,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     }
 
     private func showWindow() {
+        if topology == .windows {
+            for rt in runtimes { rt.window?.makeKeyAndOrderFront(nil) }
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
         if window.contentView !== webView {
             window.contentView = webView
             benchLog("show: reattached webView")
@@ -696,7 +806,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
         // Ngoài surface Messenger thì mở browser, KHÔNG giữ trong app: link facebook.com
         // trong tin nhắn từng làm app rời khỏi Messenger và không có đường về.
-        if isMessengerSurface(url) {
+        if isSurface(url, of: service(for: webView)) {
             handler(.allow)
         } else {
             NSWorkspace.shared.open(url)
@@ -787,7 +897,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         retryDelay = min(retryDelay * 2, 60)
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self else { return }
-            self.webView.load(URLRequest(url: messengerURL))
+            self.webView.load(URLRequest(url: self.activeService.url))
         }
     }
 }
