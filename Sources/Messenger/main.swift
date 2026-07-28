@@ -51,6 +51,21 @@ let safariUserAgentSuffix: String = {
     return "Version/26.5 Safari/605.1.15"
 }()
 
+/// UA ghi đè hoàn toàn, để thử site mobile: `FBMESS_UA=mobile` hoặc một chuỗi UA đầy đủ.
+///
+/// `applicationNameForUserAgent` chỉ GHÉP vào UA mặc định (vẫn ghi "Macintosh"), nên
+/// không tới được site mobile — Facebook sniff thấy desktop và redirect m→www.
+/// Phải dùng `webView.customUserAgent`.
+let mobileUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) "
+    + "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1"
+
+func resolveCustomUserAgent(_ raw: String?) -> String? {
+    guard let raw, !raw.isEmpty else { return nil }
+    return raw.lowercased() == "mobile" ? mobileUserAgent : raw
+}
+
+let customUA = resolveCustomUserAgent(ProcessInfo.processInfo.environment["FBMESS_UA"])
+
 // MARK: - Chế độ hiệu năng
 
 /// Bốn biến thể để bench. Chọn bằng `FBMESS_MODE`, mặc định `baseline`.
@@ -340,6 +355,13 @@ func runSelftest() {
 
     check(jsString("a\"b") == "\"a\\\"b\"", "escape JS string")
 
+    check(resolveCustomUserAgent(nil) == nil, "không set UA → dùng UA mặc định")
+    check(resolveCustomUserAgent("") == nil, "UA rỗng → mặc định")
+    check(resolveCustomUserAgent("mobile") == mobileUserAgent, "preset mobile")
+    check(resolveCustomUserAgent("MOBILE") == mobileUserAgent, "preset không phân biệt hoa thường")
+    check(resolveCustomUserAgent("Custom/1.0") == "Custom/1.0", "UA tuỳ ý giữ nguyên")
+    check(mobileUserAgent.contains("iPhone"), "UA mobile phải nói iPhone")
+
     check(resolveStartURL(nil) == defaultStartURL, "không có env → default")
     check(resolveStartURL("") == defaultStartURL, "env rỗng → default")
     // Phải khác defaultStartURL, không thì test pass ngay cả khi hàm luôn trả default.
@@ -536,6 +558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         // Bật lại: nếu có navigation nào lọt qua luật link thì user vẫn thoát được,
         // không bị kẹt trên trang lạ.
         wv.allowsBackForwardNavigationGestures = true
+        if let customUA { wv.customUserAgent = customUA }
         return wv
     }
 
