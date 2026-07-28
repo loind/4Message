@@ -144,6 +144,49 @@ Cần TTY thật để `sudo` nhập mật khẩu — chạy trong Terminal.app,
 | Sau nhiều phút idle | Không giảm | Giảm chậm theo scavenger |
 | Vùng vmmap | Bất kỳ | `WebKit Malloc` + graphics, JS heap nhỏ |
 
+## Phụ lục — các hướng tối ưu đã thử và KHÔNG hiệu quả
+
+Ghi lại để không thử lại. Tất cả đo cùng giao thức, cùng account.
+
+### Surface nhẹ hơn: không tồn tại
+
+| Surface | UA | Landed | Render | Footprint |
+| --- | --- | --- | --- | --- |
+| `www.facebook.com/messages` | desktop | www | 14 thread | **601 MB** |
+| `m.facebook.com/messages` | desktop | → www | bình thường | 607 MB |
+| `m.facebook.com/messages` | iPhone | → www | **trắng** | 84 MB |
+| `mbasic.facebook.com/messages` | iPhone | → www | **trắng** | 81 MB |
+
+`m.` và `mbasic.` đều redirect về `www` bất kể UA — Meta đã bỏ. Con số 84 MB là footprint
+của **trang vỡ** (`textLen: 0`, 0 ảnh, 0 row ở cả 4 mốc), không phải tối ưu.
+
+Lưu ý API: `applicationNameForUserAgent` chỉ **ghép** vào UA mặc định (vẫn ghi
+"Macintosh") nên không tới được site mobile. Phải dùng `webView.customUserAgent`.
+
+### Tham số mobile và viewport: không cải thiện
+
+| Cấu hình | Tổng | GPU |
+| --- | --- | --- |
+| baseline 1100×760 desktop | **596.5 MB** | 15.3 MB |
+| `preferredContentMode = .mobile` | 660.0 MB | 15.7 MB |
+| Cửa sổ hẹp 420×760 | 629.8 MB | 15.9 MB |
+
+Spread 33–64 MB, nằm trong/sát sàn nhiễu ~50 MB → **không có bằng chứng cải thiện**, và
+cũng không đủ để kết luận là tệ hơn.
+
+`WKWebpagePreferences.preferredContentMode` được annotate `API_AVAILABLE(ios(13.0))`
+nhưng Swift vẫn expose trên macOS và compile được — **compile được không đảm bảo có tác
+dụng**. Đo thì thấy trang vẫn render nội dung desktop.
+
+Lý do gốc cả hai hướng đều thất bại: GPU giữ ~15 MB ở mọi cấu hình, tức phần tỉ lệ với
+viewport vốn đã nhỏ. ~500 MB nằm ở `WebKit Malloc` — DOM + ảnh decode + dữ liệu JS, chi
+phối bởi **lượng nội dung load**, không bởi viewport hay layout mode.
+
+### Trần của cả hướng này
+
+Kể cả nếu có một surface nhẹ hoạt động được thì nó vẫn không dùng được: không realtime
+nghĩa là không notification, mà đó là lý do app tồn tại. `mbasic` vốn là bản không-JS.
+
 ## Phụ lục — flag tối ưu khi biên dịch Swift
 
 Câu hỏi: có bật được tối ưu mạnh như build C không, để app final nhanh hơn?

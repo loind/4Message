@@ -66,6 +66,36 @@ func resolveCustomUserAgent(_ raw: String?) -> String? {
 
 let customUA = resolveCustomUserAgent(ProcessInfo.processInfo.environment["FBMESS_UA"])
 
+/// `FBMESS_CONTENT_MODE=mobile|desktop|recommended` — cơ chế "Request Mobile Website"
+/// của Safari. Header WebKit annotate `API_AVAILABLE(ios(13.0))` nhưng Swift vẫn expose
+/// trên macOS và compile được; compile được KHÔNG đảm bảo có tác dụng, phải đo.
+func resolveContentMode(_ raw: String?) -> WKWebpagePreferences.ContentMode {
+    switch (raw ?? "").lowercased() {
+    case "mobile": return .mobile
+    case "desktop": return .desktop
+    default: return .recommended
+    }
+}
+
+let contentMode = resolveContentMode(ProcessInfo.processInfo.environment["FBMESS_CONTENT_MODE"])
+
+/// `FBMESS_WINDOW=420x760` — đổi kích thước cửa sổ để đo ảnh hưởng của viewport.
+/// Layer backing store và vùng graphics tỉ lệ với diện tích cửa sổ, nên đây là phần
+/// viewport thật sự chi phối; còn `WebKit Malloc` (~500 MB) thì theo lượng nội dung
+/// đã load, không theo viewport.
+func resolveWindowSize(_ raw: String?) -> NSSize {
+    let fallback = NSSize(width: 1100, height: 760)
+    guard let raw else { return fallback }
+    let parts = raw.lowercased().split(separator: "x")
+    guard parts.count == 2,
+          let w = Double(parts[0]), let h = Double(parts[1]),
+          w >= 320, h >= 320, w <= 8000, h <= 8000
+    else { return fallback }
+    return NSSize(width: w, height: h)
+}
+
+let windowSize = resolveWindowSize(ProcessInfo.processInfo.environment["FBMESS_WINDOW"])
+
 // MARK: - Chế độ hiệu năng
 
 /// Bốn biến thể để bench. Chọn bằng `FBMESS_MODE`, mặc định `baseline`.
@@ -355,6 +385,18 @@ func runSelftest() {
 
     check(jsString("a\"b") == "\"a\\\"b\"", "escape JS string")
 
+    check(resolveContentMode(nil) == .recommended, "không set → recommended")
+    check(resolveContentMode("mobile") == .mobile, "mobile")
+    check(resolveContentMode("desktop") == .desktop, "desktop")
+    check(resolveContentMode("rác") == .recommended, "giá trị lạ → recommended")
+
+    check(resolveWindowSize(nil) == NSSize(width: 1100, height: 760), "không set → mặc định")
+    check(resolveWindowSize("420x760") == NSSize(width: 420, height: 760), "parse WxH")
+    check(resolveWindowSize("420X760") == NSSize(width: 420, height: 760), "X hoa cũng được")
+    check(resolveWindowSize("rác") == NSSize(width: 1100, height: 760), "chuỗi rác → mặc định")
+    check(resolveWindowSize("10x10") == NSSize(width: 1100, height: 760), "quá nhỏ → mặc định")
+    check(resolveWindowSize("99999x99999") == NSSize(width: 1100, height: 760), "quá lớn → mặc định")
+
     check(resolveCustomUserAgent(nil) == nil, "không set UA → dùng UA mặc định")
     check(resolveCustomUserAgent("") == nil, "UA rỗng → mặc định")
     check(resolveCustomUserAgent("mobile") == mobileUserAgent, "preset mobile")
@@ -516,7 +558,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func makeWindow(title: String, autosave: String) -> NSWindow {
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
+            contentRect: NSRect(origin: .zero, size: windowSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered, defer: false)
         w.title = title
@@ -538,6 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         // ra đúng format Safari. Bump khi Safari lên version mới.
         config.applicationNameForUserAgent = safariUserAgentSuffix
         config.preferences.inactiveSchedulingPolicy = mode.schedulingPolicy
+        config.defaultWebpagePreferences.preferredContentMode = contentMode
         config.userContentController.add(self, name: "mbr")
         config.userContentController.addUserScript(
             WKUserScript(source: bridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
