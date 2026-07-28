@@ -237,6 +237,27 @@ func isInternal(_ url: URL) -> Bool {
     return internalHosts.contains { host == $0 || host.hasSuffix("." + $0) }
 }
 
+/// Link user CLICK có được giữ trong app hay không — khác hẳn `isInternal`.
+///
+/// `isInternal` trả lời "host nào được phép LOAD", và buộc phải chứa cả `facebook.com`
+/// vì luồng login redirect qua đó. Dùng chính nó để quyết định link click là sai: mọi
+/// link facebook.com trong tin nhắn (post, ảnh, page, reel) sẽ điều hướng app rời khỏi
+/// Messenger, và app không có đường về nên trông như bị treo.
+///
+/// Hàm này chỉ nhận đúng surface Messenger.
+func isMessengerSurface(_ url: URL) -> Bool {
+    guard let host = url.host?.lowercased() else { return false }
+    let matches = { (domain: String) in host == domain || host.hasSuffix("." + domain) }
+
+    if matches("messenger.com") || matches("m.me") { return true }
+    if matches("facebook.com") {
+        let path = url.path
+        // Khớp chính xác `/messages` hoặc có `/` sau — để `/messagesfake` không lọt.
+        return path == "/messages" || path.hasPrefix("/messages/")
+    }
+    return false
+}
+
 /// Dùng `fatalError` chứ KHÔNG dùng `precondition`/`assert`: `-Ounchecked` xoá cả hai,
 /// khiến selftest luôn "pass" dù logic sai. `fatalError` sống sót mọi mức tối ưu.
 func check(_ condition: Bool, _ what: String, line: UInt = #line) {
@@ -259,6 +280,20 @@ func runSelftest() {
     check(!isInternal(URL(string: "https://evil-messenger.com/")!), "chặn suffix giả mạo")
     check(!isInternal(URL(string: "https://youtube.com/watch")!), "host ngoài")
     check(!isInternal(URL(string: "mailto:a@b.c")!), "scheme không có host")
+
+    // Link click: chỉ surface Messenger được ở lại trong app.
+    check(isMessengerSurface(URL(string: "https://www.facebook.com/messages/")!), "fb /messages/")
+    check(isMessengerSurface(URL(string: "https://www.facebook.com/messages")!), "fb /messages")
+    check(isMessengerSurface(URL(string: "https://www.facebook.com/messages/e2ee/t/1")!), "fb thread")
+    check(isMessengerSurface(URL(string: "https://www.messenger.com/t/1")!), "messenger.com")
+    check(isMessengerSurface(URL(string: "https://m.me/abc")!), "m.me")
+    // Đây là bug đã gây treo: link content facebook.com phải ra browser.
+    check(!isMessengerSurface(URL(string: "https://www.facebook.com/facebook")!), "fb page → browser")
+    check(!isMessengerSurface(URL(string: "https://www.facebook.com/photo/?fbid=1")!), "fb photo → browser")
+    check(!isMessengerSurface(URL(string: "https://www.facebook.com/reel/1")!), "fb reel → browser")
+    check(!isMessengerSurface(URL(string: "https://www.facebook.com/messagesfake")!), "prefix giả không lọt")
+    check(!isMessengerSurface(URL(string: "https://evil-facebook.com/messages/")!), "host giả mạo")
+    check(!isMessengerSurface(URL(string: "https://youtube.com/watch")!), "host ngoài")
 
     check(jsString("a\"b") == "\"a\\\"b\"", "escape JS string")
 
@@ -373,7 +408,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = self
         webView.uiDelegate = self
-        webView.allowsBackForwardNavigationGestures = false
+        // Bật lại: nếu có navigation nào lọt qua luật link thì user vẫn thoát được,
+        // không bị kẹt trên trang lạ.
+        webView.allowsBackForwardNavigationGestures = true
 
         titleObserver = webView.observe(\.title, options: [.new]) { [weak self] webView, _ in
             self?.applyTitle(webView.title)
@@ -443,6 +480,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Về Messenger", action: #selector(goHome), keyEquivalent: "H")
+        appMenu.addItem(withTitle: "Quay lại", action: #selector(goBack), keyEquivalent: "[")
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Tải lại", action: #selector(reload), keyEquivalent: "r")
         appMenu.addItem(withTitle: "Xoá HTTP cache & tải lại",
                         action: #selector(clearHTTPCache), keyEquivalent: "R")
@@ -476,6 +516,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     @objc private func hideWindow() { hide() }
     @objc private func reload() { webView.reload() }
+    @objc private func goBack() { webView.goBack() }
+
+    /// Lưới an toàn: `⌘R` chỉ reload URL hiện tại, nên nếu bị điều hướng ra trang lạ
+    /// thì không có cách nào về Messenger. Menu này load lại start URL.
+    @objc private func goHome() {
+        webView.load(URLRequest(url: messengerURL))
+    }
 
     /// Xoá cache HTTP rồi tải lại.
     ///
@@ -577,11 +624,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     func webView(_ webView: WKWebView,
                  decidePolicyFor action: WKNavigationAction,
                  decisionHandler handler: @escaping (WKNavigationActionPolicy) -> Void) {
-        // Chỉ chặn link user click; redirect/form submit phải cho qua để không phá login.
+        // CHỈ chặn link user click. Redirect và form submit phải cho qua, nếu không
+        // là phá luồng login — nên thắt chặt luật dưới đây không ảnh hưởng login.
         guard action.navigationType == .linkActivated, let url = action.request.url else {
             return handler(.allow)
         }
-        if isInternal(url) {
+        // Ngoài surface Messenger thì mở browser, KHÔNG giữ trong app: link facebook.com
+        // trong tin nhắn từng làm app rời khỏi Messenger và không có đường về.
+        if isMessengerSurface(url) {
             handler(.allow)
         } else {
             NSWorkspace.shared.open(url)
