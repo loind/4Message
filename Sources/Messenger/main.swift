@@ -215,6 +215,41 @@ func benchLog(_ message: String) {
     FileHandle.standardError.write(Data("[fbmess] \(message)\n".utf8))
 }
 
+// MARK: - Thông tin bản build
+
+/// Gộp thành một khối text để dán khi báo lỗi.
+///
+/// Lý do tồn tại: đã xảy ra chuyện một máy chạy bản cũ thiếu fix mà không ai biết,
+/// và không có cách nào kiểm tra ngoài đoán. Commit là thứ định danh duy nhất đáng tin.
+func versionSummary(version: String, build: String, commit: String, dirty: Bool,
+                    buildDate: String, surface: String, mode: String) -> String {
+    let commitText = dirty ? "\(commit) (DIRTY — build từ working tree chưa commit)" : commit
+    return """
+    FB Mess \(version) (build \(build))
+    commit   \(commitText)
+    built    \(buildDate)
+    surface  \(surface)
+    mode     \(mode)
+    macOS    \(ProcessInfo.processInfo.operatingSystemVersionString)
+    """
+}
+
+/// Đọc từ Info.plist — build.sh nhúng vào lúc đóng bundle. Chạy qua `swift run` thì
+/// không có bundle nên trả "unknown", không crash.
+func currentVersionSummary() -> String {
+    let info = Bundle.main.infoDictionary ?? [:]
+    let s = { (key: String) in info[key] as? String ?? "unknown" }
+    return versionSummary(
+        version: s("CFBundleShortVersionString"),
+        build: s("CFBundleVersion"),
+        commit: s("FBMessGitCommit"),
+        dirty: (info["FBMessGitDirty"] as? Bool) ?? false,
+        buildDate: s("FBMessBuildDate"),
+        surface: messengerURL.absoluteString,
+        mode: Mode.current.rawValue
+    )
+}
+
 // MARK: - Logic thuần (được cover bởi `--selftest`)
 
 /// Messenger đặt số tin chưa đọc ở đầu `document.title`: `"(3) Chats · Messenger"`.
@@ -314,6 +349,17 @@ func runSelftest() {
     check(Mode.allCases.filter(\.holdsAwakeAssertion) == [.baseline], "chỉ baseline giữ assertion")
     check(Mode.allCases.filter { !$0.detachesWhenHidden } == [.baseline], "chỉ baseline không detach")
 
+    // Cảnh báo dirty phải xuất hiện, nếu không bản build không tái tạo được mà không ai biết.
+    let clean = versionSummary(version: "0.1.0", build: "7", commit: "abc1234", dirty: false,
+                              buildDate: "2026-07-28T09:00:00Z", surface: "https://x/", mode: "baseline")
+    check(clean.contains("FB Mess 0.1.0 (build 7)"), "dòng đầu có version + build")
+    check(clean.contains("commit   abc1234"), "có commit")
+    check(!clean.lowercased().contains("dirty"), "clean thì không báo dirty")
+
+    let dirty = versionSummary(version: "0.1.0", build: "7", commit: "abc1234", dirty: true,
+                               buildDate: "2026-07-28T09:00:00Z", surface: "https://x/", mode: "baseline")
+    check(dirty.contains("DIRTY"), "dirty thì phải báo DIRTY")
+
     // Rule list phải là JSON hợp lệ — sai cú pháp thì WebKit chỉ fail lúc runtime.
     check((try? JSONSerialization.jsonObject(with: Data(blockRulesJSON.utf8))) != nil,
           "blockRulesJSON là JSON hợp lệ")
@@ -341,6 +387,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private lazy var placeholder = NSView()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Log ngay đầu tiên: đọc log mà không biết bản nào sinh ra nó thì vô dụng.
+        for line in currentVersionSummary().split(separator: "\n") { benchLog(String(line)) }
+
         benchLog("mode=\(mode.rawValue) policy=\(mode.schedulingPolicy.rawValue) "
                  + "detach=\(mode.detachesWhenHidden) assertion=\(mode.holdsAwakeAssertion) "
                  + "block=\(mode.blocksTelemetryAndMedia) hideAfter=\(benchHideAfter)")
@@ -480,7 +529,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "Về Messenger", action: #selector(goHome), keyEquivalent: "H")
+        appMenu.addItem(withTitle: "Thông tin bản build…", action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Về trang Messenger", action: #selector(goHome), keyEquivalent: "H")
         appMenu.addItem(withTitle: "Quay lại", action: #selector(goBack), keyEquivalent: "[")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Tải lại", action: #selector(reload), keyEquivalent: "r")
@@ -517,6 +568,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     @objc private func hideWindow() { hide() }
     @objc private func reload() { webView.reload() }
     @objc private func goBack() { webView.goBack() }
+
+    /// Có nút Copy vì mục đích chính của panel này là dán vào báo lỗi.
+    @objc private func showAbout() {
+        let text = currentVersionSummary()
+        let alert = NSAlert()
+        alert.messageText = "FB Mess"
+        alert.informativeText = text
+        alert.addButton(withTitle: "Đóng")
+        alert.addButton(withTitle: "Copy")
+        if alert.runModal() == .alertSecondButtonReturn {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
 
     /// Lưới an toàn: `⌘R` chỉ reload URL hiện tại, nên nếu bị điều hướng ra trang lạ
     /// thì không có cách nào về Messenger. Menu này load lại start URL.
@@ -731,6 +796,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
 if CommandLine.arguments.contains("--selftest") {
     runSelftest()
+    exit(0)
+}
+
+// Kiểm tra máy khác đang chạy bản nào mà không cần mở GUI.
+if CommandLine.arguments.contains("--version") {
+    print(currentVersionSummary())
     exit(0)
 }
 

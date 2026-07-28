@@ -101,6 +101,35 @@ chứ không ẩn nhầm thứ đang cần. Đánh đổi: phụ thuộc ngôn n
   rule nào khớp 0, để CSS vỡ không âm thầm.
 - **Kill switch** — `FBMESS_KEEP_FB_CHROME=1` tắt toàn bộ, không cần rebuild.
 
+## Biết đang chạy bản nào
+
+Từng xảy ra chuyện một máy chạy bản cũ thiếu fix mà không ai biết. Commit là thứ định
+danh duy nhất đáng tin, nên `build.sh` nhúng nó vào `Info.plist` lúc đóng bundle.
+
+Kiểm tra không cần mở GUI — dùng được cả trên máy khác:
+
+```bash
+"FB Mess.app/Contents/MacOS/Messenger" --version
+```
+
+```
+FB Mess 0.1.0 (build 7)
+commit   47c03c3
+built    2026-07-28T13:18:36Z
+surface  https://www.facebook.com/messages/
+mode     baseline
+macOS    26.5.2 (25F84)
+```
+
+Trong app: menu **Thông tin bản build…**, có nút Copy để dán vào báo lỗi. Cùng nội dung
+đó cũng được ghi ra stderr ngay khi app khởi động — đọc log mà không biết bản nào sinh ra
+nó thì vô dụng.
+
+`CFBundleVersion` = `git rev-list --count HEAD`, nên số build tăng đơn điệu theo commit.
+
+Nếu build khi working tree chưa commit, `build.sh` in cảnh báo và `--version` đánh dấu
+**DIRTY** — bản đó không tái tạo được từ git.
+
 ## Đo hiệu năng — so với Franz
 
 ```bash
