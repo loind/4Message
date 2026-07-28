@@ -11,7 +11,11 @@
 # mất một thay đổi thật. `footprint` cũng nhanh hơn (~0.03s so với ~0.5s mỗi process).
 #
 # Ngoài footprint còn báo:
-#   RECLAIM — phần OS lấy lại được khi cần. Đây là thứ phân biệt cache với leak.
+#   RECLAIM — trang OS lấy lại được NGAY (clean/purgeable). KHÔNG tính phần cache mà
+#             WebKit tự purge khi nhận notification memory pressure — mà chính phần đó
+#             tạo ra mức giảm 42% trong pressure-test. Nên RECLAIM thấp KHÔNG kết luận
+#             được là leak. Muốn phân biệt cache với leak: xem đường có plateau không,
+#             và chạy `pressure-test.sh`.
 #   PEAK    — mức cao nhất từ lúc process sinh ra (chỉ ở snapshot mode).
 #
 # Không dùng RSS: bỏ qua trang đã bị nén nên báo thiếu (348 MB RSS cho process mà
@@ -144,7 +148,8 @@ if [[ "$MODE" != "--watch" ]]; then
     printf "%-8s %11s %11s %11s %7s\n" TỔNG "$S_TOTAL" "$S_RECLAIM" "" "$S_CPU"
     echo
     echo "attribution: $ATTRIBUTION"
-    echo "RECLAIM = phần OS lấy lại được khi cần → đây là cache, không phải leak."
+    echo "RECLAIM = trang OS lấy lại được NGAY. KHÔNG tính cache WebKit tự purge khi có"
+    echo "          memory pressure, nên RECLAIM thấp KHÔNG kết luận được là leak."
     echo "PEAK    = mức cao nhất từ lúc process sinh ra."
     echo "Ảnh chụp 1 thời điểm — dùng --watch để thấy memory phình theo giờ."
     exit 0

@@ -150,10 +150,15 @@ không so được với process cũ).
 
 Hai cột quan trọng:
 
-- **RECLAIM** — phần OS lấy lại được khi cần. Đây là thứ phân biệt **cache với leak** ngay
-  trong lúc đo, không cần chạy `pressure-test.sh`. Ví dụ WebContent 585 MB / reclaim
-  351 MB nghĩa là 60% chỉ là cache.
+- **RECLAIM** — trang OS lấy lại được **ngay** (clean/purgeable). **Không** tính phần cache
+  mà WebKit tự purge khi nhận notification memory pressure — mà chính phần đó tạo ra mức
+  giảm 42% trong `pressure-test.sh`. Nên **RECLAIM thấp không kết luận được là leak**: đo
+  thực tế thấy một máy ở 130/1270 MB (10%) mà vẫn plateau hoàn toàn, còn máy khác
+  351/585 MB (60%).
 - **PEAK** — mức cao nhất từ lúc process sinh ra (chỉ ở snapshot mode).
+
+Phân biệt cache với leak thì xem **đường có plateau không** (leak tăng đơn điệu, cache
+phẳng ra), rồi xác nhận bằng `pressure-test.sh`.
 
 Số lấy từ `/usr/bin/footprint --json`, đọc bằng `plutil` nên **chính xác tới byte** và
 không cần python. Bản trước parse text của `vmmap`, trên 1 GB nó in `"1.4G"` nên độ phân
