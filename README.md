@@ -137,7 +137,18 @@ Nếu build khi working tree chưa commit, `build.sh` in cảnh báo và `--vers
 ./measure.sh Franz
 ```
 
-`measure.sh` chỉ xem nhanh. Số liệu nghiêm túc dùng `./bench.sh` với giao thức cố định —
+```bash
+./measure.sh "FB Mess"                       # chụp 1 thời điểm
+./measure.sh "FB Mess" --watch               # theo dõi liên tục, ghi memory-track.csv
+INTERVAL=300 ./measure.sh "FB Mess" --watch  # 5 phút/mẫu
+```
+
+Watch mode để trả lời câu snapshot không trả lời được: **memory phình lúc nào và process
+nào phình**. Nó tách riêng app / GPU / Networking / WebContent, đếm số WebContent, và in
+Δ so với mẫu đầu. Tự tra lại PID nếu app bị relaunch (và reset mốc Δ, vì process mới
+không so được với process cũ).
+
+Số liệu nghiêm túc để so phương án thì dùng `./bench.sh` với giao thức cố định —
 xem `docs/perf-process.md`.
 
 Số đo thật sau khi login (`phys_footprint`, chính là số Activity Monitor hiện):

@@ -8,3 +8,4 @@ startup-*.log
 diag.log
 build-icon/
 *.bc
+memory-track.csv
