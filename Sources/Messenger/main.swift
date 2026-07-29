@@ -549,6 +549,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var webHost: NSView?
     private var railButtons: [NSButton] = []
     private var railBadges: [NSTextField] = []
+    private var railView: NSStackView?
+    private var railWidthConstraint: NSLayoutConstraint?
+    private var railMenuItem: NSMenuItem?
+
+    /// Nhớ trạng thái thu gọn qua lần chạy sau — thu gọn rồi mà mở lại app lại bung ra
+    /// thì tính năng vô nghĩa.
+    private static let railCollapsedKey = "railCollapsed"
+    private var railCollapsed: Bool {
+        get { UserDefaults.standard.bool(forKey: Self.railCollapsedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: Self.railCollapsedKey) }
+    }
     private var hotkey: Hotkey?
     private var activity: NSObjectProtocol?
     private var retryDelay: TimeInterval = 2
@@ -653,6 +664,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         webHost = host
 
         let rail = NSStackView()
+        railView = rail
         rail.orientation = .vertical
         rail.alignment = .centerX
         rail.spacing = 6
@@ -671,6 +683,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
                 .withSymbolConfiguration(.init(pointSize: 22, weight: .semibold))
             b.image?.isTemplate = true
             b.toolTip = service.title
+            // Đặt label thẳng trên nút, KHÔNG dựa vào accessibilityDescription của image:
+            // `.withSymbolConfiguration(...)` trả về image mới và làm mất description đó,
+            // nên nút icon-only thành không có label cho screen reader.
+            b.setAccessibilityLabel(service.title)
             b.wantsLayer = true
             b.layer?.cornerRadius = 12
             b.translatesAutoresizingMaskIntoConstraints = false
@@ -707,20 +723,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             v.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(v)
         }
+        let railWidth = rail.widthAnchor.constraint(equalToConstant: 64)
+        railWidthConstraint = railWidth
+
         NSLayoutConstraint.activate([
             rail.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             rail.topAnchor.constraint(equalTo: container.topAnchor),
             rail.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            rail.widthAnchor.constraint(equalToConstant: 64),
+            railWidth,
             host.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
             host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             host.topAnchor.constraint(equalTo: container.topAnchor),
             host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
+
+        applyRailCollapsed(animated: false)
         return container
     }
 
     @objc private func railClicked(_ sender: NSButton) { select(index: sender.tag) }
+
+    @objc private func toggleRail() {
+        railCollapsed.toggle()
+        applyRailCollapsed(animated: true)
+    }
+
+    private func applyRailCollapsed(animated: Bool) {
+        let collapsed = railCollapsed
+        railWidthConstraint?.constant = collapsed ? 0 : 64
+        railView?.isHidden = collapsed
+        railMenuItem?.title = collapsed ? "Hiện cột kênh" : "Ẩn cột kênh"
+
+        guard animated else { return }
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            ctx.allowsImplicitAnimation = true
+            self.window?.contentView?.layoutSubtreeIfNeeded()
+        }
+        benchLog("rail \(collapsed ? "thu gọn" : "bung")")
+    }
 
     /// Gắn webview vào vùng chứa. Tháo cái cũ ra trước — đó cũng chính là "detach khỏi
     /// view hierarchy" mà inactiveSchedulingPolicy cần.
@@ -935,6 +976,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
                 item.tag = i
                 svc.addItem(item)
             }
+            svc.addItem(.separator())
+            // ⌘0 không đụng ⌘1/2/3 đang dùng để đổi kênh.
+            let toggle = NSMenuItem(title: "Ẩn cột kênh", action: #selector(toggleRail), keyEquivalent: "0")
+            svc.addItem(toggle)
+            railMenuItem = toggle
+
             svcItem.submenu = svc
             main.addItem(svcItem)
             serviceMenu = svc
@@ -947,7 +994,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     /// Dấu tick vào service đang xem — không có thì không biết mình đang ở đâu.
     private func refreshServiceMenu() {
         guard let serviceMenu else { return }
-        for item in serviceMenu.items { item.state = item.tag == activeIndex ? .on : .off }
+        // Chỉ tick item service (tag = index). Item toggle rail có tag 0 mặc định nên
+        // phải loại theo action, không thì nó cũng bị tick khi đang ở kênh đầu.
+        for item in serviceMenu.items where item.action == #selector(switchService(_:)) {
+            item.state = item.tag == activeIndex ? .on : .off
+        }
     }
 
     // MARK: Ẩn/hiện — đóng là ẩn, không quit (resident ở menu bar)

@@ -68,13 +68,26 @@ Ba cách đổi kênh:
 
 | Cách | Ghi chú |
 | --- | --- |
-| **Rail dọc trong cửa sổ** | Hiện khi có >1 service. Kênh đang xem in đậm + nền accent |
+| **Rail dọc trong cửa sổ** | Hiện khi có >1 service. Tile màu thương hiệu, kênh đang xem sáng + viền trắng |
 | Menu **Service** | Trên thanh menu, có dấu tick |
 | ⌘1 / ⌘2 / ⌘3 | |
 
 Rail hiện **số chưa đọc của từng kênh** — đó là lý do chính để có nó, thấy kênh khác có
 tin mới mà không phải bấm qua. Với 1 service thì rail không dựng (chiếm chỗ mà không chọn
 được gì).
+
+Thu gọn rail: **Service → Ẩn cột kênh** (⌘0). Trạng thái lưu vào `UserDefaults` nên nhớ qua
+lần chạy sau. Thu gọn rồi vẫn đổi kênh được bằng ⌘1/⌘2/⌘3 hoặc menu Service.
+
+Thiết kế rail xem trước không cần chạy app:
+
+```bash
+swift tools/preview-rail.swift out.png
+```
+
+Nó render đúng control AppKit thật ra PNG offscreen — cần vì `screencapture` đòi quyền
+Screen Recording. Lưu ý: đó là bản **dựng lại theo spec**, không phải ảnh chụp app đang
+chạy, nên có thể lệch nếu sửa `main.swift` mà không sửa nó.
 
 **Threads là FEED, không phải chat.** `threads.com/direct` và `/direct/inbox` đều redirect
 về feed → web Threads không có surface DM (đã kiểm chứng). Giữ trong danh sách vì có thể
