@@ -437,8 +437,13 @@ func runSelftest() {
     check(!isSurface(URL(string: "https://www.instagram.com/explore/")!, of: ig), "ig explore → browser")
     check(!isSurface(URL(string: "https://www.instagram.com/direct/")!, of: msg), "ig không thuộc messenger")
     check(!isSurface(URL(string: "https://www.facebook.com/messages/")!, of: ig), "fb không thuộc instagram")
-    check(isSurface(URL(string: "https://www.threads.com/@x")!, of: th), "threads nhận mọi path")
+    // Threads DM ở /messages/ (KHÔNG phải /direct/ — suy diễn theo Instagram là sai).
+    check(isSurface(URL(string: "https://www.threads.com/messages/")!, of: th), "threads /messages/")
+    check(isSurface(URL(string: "https://www.threads.net/messages/x")!, of: th), "threads.net cũng nhận")
+    check(!isSurface(URL(string: "https://www.threads.com/@x")!, of: th), "profile threads → browser")
+    check(!isSurface(URL(string: "https://www.threads.com/search")!, of: th), "search threads → browser")
     check(!isSurface(URL(string: "https://www.threads.com/@x")!, of: ig), "threads không thuộc instagram")
+    check(knownServices.allSatisfy { !$0.symbol.isEmpty }, "mọi service phải có SF Symbol")
 
     check(resolveServices(nil).map(\.id) == ["messenger"], "không set → chỉ messenger")
     check(resolveServices("").map(\.id) == ["messenger"], "rỗng → chỉ messenger")
@@ -543,6 +548,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     /// Rail chọn kênh trong cửa sổ (chỉ ở topology .tabs, khi có >1 service).
     private var webHost: NSView?
     private var railButtons: [NSButton] = []
+    private var railBadges: [NSTextField] = []
     private var hotkey: Hotkey?
     private var activity: NSObjectProtocol?
     private var retryDelay: TimeInterval = 2
@@ -648,17 +654,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let rail = NSStackView()
         rail.orientation = .vertical
-        rail.alignment = .leading
+        rail.alignment = .centerX
         rail.spacing = 6
-        rail.edgeInsets = NSEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
+        rail.edgeInsets = NSEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
 
         railButtons = services.enumerated().map { i, service in
-            let b = NSButton(title: service.title, target: self, action: #selector(railClicked(_:)))
+            let b = NSButton(frame: .zero)
             b.tag = i
-            b.bezelStyle = .rounded
-            b.alignment = .left
+            b.target = self
+            b.action = #selector(railClicked(_:))
+            b.title = ""
+            b.isBordered = false
+            b.imagePosition = .imageOnly
+            // Không set pointSize thì SF Symbol render ở cỡ mặc định, nhỏ hẳn so với ô.
+            b.image = NSImage(systemSymbolName: service.symbol, accessibilityDescription: service.title)?
+                .withSymbolConfiguration(.init(pointSize: 22, weight: .semibold))
+            b.image?.isTemplate = true
+            b.toolTip = service.title
+            b.wantsLayer = true
+            b.layer?.cornerRadius = 12
             b.translatesAutoresizingMaskIntoConstraints = false
-            b.widthAnchor.constraint(equalToConstant: 112).isActive = true
+            b.widthAnchor.constraint(equalToConstant: 48).isActive = true
+            b.heightAnchor.constraint(equalToConstant: 48).isActive = true
+
+            // Badge unread: icon-only nên phải có chỗ hiện số, không thì mất luôn lý do
+            // chính để có rail (thấy kênh khác có tin mới mà không phải bấm qua).
+            let badge = NSTextField(labelWithString: "")
+            badge.font = .systemFont(ofSize: 9.5, weight: .bold)
+            badge.textColor = .white
+            badge.alignment = .center
+            badge.wantsLayer = true
+            badge.layer?.backgroundColor = NSColor.systemRed.cgColor
+            badge.layer?.cornerRadius = 7.5
+            badge.isHidden = true
+            badge.translatesAutoresizingMaskIntoConstraints = false
+            b.addSubview(badge)
+            // Ở GÓC tile, tràn 4px như badge iOS. Rail 64 / tile 48 nên còn 8px lề mỗi
+            // bên — tràn 4px vẫn không bị rail cắt (bản đầu tràn nhiều hơn nên bị cắt).
+            NSLayoutConstraint.activate([
+                badge.trailingAnchor.constraint(equalTo: b.trailingAnchor, constant: 4),
+                badge.topAnchor.constraint(equalTo: b.topAnchor, constant: -4),
+                badge.heightAnchor.constraint(equalToConstant: 15),
+                badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 15),
+            ])
+            railBadges.append(badge)
+
             rail.addView(b, in: .top)
             return b
         }
@@ -671,7 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             rail.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             rail.topAnchor.constraint(equalTo: container.topAnchor),
             rail.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            rail.widthAnchor.constraint(equalToConstant: 128),
+            rail.widthAnchor.constraint(equalToConstant: 64),
             host.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
             host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             host.topAnchor.constraint(equalTo: container.topAnchor),
@@ -697,11 +737,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         ])
     }
 
+    /// Tile mang màu thương hiệu, glyph TRẮNG. Bản đầu dùng glyph màu trên tile xám —
+    /// tile inactive lại nổi hơn active, tức ngược logic; và glyph xám nhạt trên xám
+    /// sáng thì gần như không đọc được. Thiết kế này xem trước bằng
+    /// `swift tools/preview-rail.swift out.png` (không cần quyền Screen Recording).
     private func refreshRail() {
         for (i, b) in railButtons.enumerated() {
             let active = i == activeIndex
-            b.font = .systemFont(ofSize: NSFont.systemFontSize, weight: active ? .bold : .regular)
-            b.bezelColor = active ? .controlAccentColor : nil
+            b.layer?.backgroundColor = services[i].tint
+                .withAlphaComponent(active ? 1.0 : 0.45).cgColor
+            b.contentTintColor = NSColor.white.withAlphaComponent(active ? 1.0 : 0.8)
+            b.layer?.borderWidth = active ? 2 : 0
+            b.layer?.borderColor = NSColor.white.withAlphaComponent(0.85).cgColor
         }
     }
 
@@ -819,9 +866,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
         // Số chưa đọc của TỪNG service lên rail — đây là lý do chính để có rail:
         // thấy service khác có tin mới mà không phải bấm qua.
-        if let i = runtimes.firstIndex(where: { $0.webView === source }), i < railButtons.count {
+        if let i = runtimes.firstIndex(where: { $0.webView === source }), i < railBadges.count {
             let unread = unreadBadge(from: title)
-            railButtons[i].title = unread.map { "\(services[i].title)  \($0)" } ?? services[i].title
+            railBadges[i].stringValue = unread ?? ""
+            railBadges[i].isHidden = unread == nil
+            railButtons[i].toolTip = unread.map { "\(services[i].title) — \($0)" } ?? services[i].title
         }
 
         // Badge dock/menu bar chỉ phản ánh service đang active — không lọc thì service
@@ -1000,10 +1049,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         if payload["kind"] as? String == "chrome" {
             let svc = payload["service"] as? String ?? "?"
+            let phase = payload["phase"] as? String ?? "?"
             let hits = payload["hits"] as? String ?? "?"
             let misses = payload["misses"] as? String ?? ""
             if misses.isEmpty {
-                benchLog("[\(svc)] chrome: \(hits)")
+                benchLog("[\(svc)] chrome(\(phase)): \(hits)")
+            } else if phase == "early" {
+                // Mốc sớm thiếu rule là bình thường với nav render trễ — chỉ log, không cảnh báo.
+                benchLog("[\(svc)] chrome(early, chưa đủ): \(hits)")
             } else {
                 benchLog("[\(svc)] CẢNH BÁO chrome: rule không khớp gì → [\(misses)]. "
                          + "Facebook có thể đã đổi cấu trúc hoặc ngôn ngữ UI. Chi tiết: \(hits)")

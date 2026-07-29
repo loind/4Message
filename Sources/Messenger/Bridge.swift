@@ -92,16 +92,23 @@ func makeHideChromeJS(serviceId: String, rules: [HideRule]) -> String {
 
       // Self-check từng rule: khớp 0 element nghĩa là site đã đổi cấu trúc/label.
       // Báo về native để biết, thay vì hỏng âm thầm.
-      setTimeout(() => {
+      //
+      // Chạy 2 mốc và chỉ báo mốc SAU: nav của Threads trên /messages/ render trễ, mốc
+      // 8s báo thiếu 3 rule dù chúng đúng. Cảnh báo sai thường xuyên thì người dùng
+      // quen bỏ qua cảnh báo thật.
+      const report = (phase) => {
         try {
           window.webkit.messageHandlers.mbr.postMessage({
             kind: 'chrome',
             service: SERVICE,
+            phase: phase,
             hits: RULES.map(r => r.name + '=' + document.querySelectorAll(r.sel).length).join(' '),
             misses: RULES.filter(r => !document.querySelector(r.sel)).map(r => r.name).join(',')
           });
         } catch (e) {}
-      }, 8000);
+      };
+      setTimeout(() => report('early'), 8000);
+      setTimeout(() => report('late'), 25000);
     })();
     """
 }

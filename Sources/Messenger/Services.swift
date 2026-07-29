@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Một host thuộc surface của service, kèm path prefix bắt buộc.
@@ -34,11 +35,15 @@ struct Service: Equatable {
     /// CSS ẩn chrome. Phải riêng từng service: DOM của Facebook và Instagram khác nhau
     /// hoàn toàn, dùng chung selector là ẩn nhầm hoặc không ẩn được gì.
     let hideRules: [HideRule]
+    /// SF Symbol cho rail. Dùng SF Symbols vì license cho phép trong UI (chỉ cấm làm
+    /// app icon/logo) — khác với logo thương hiệu của Meta.
+    let symbol: String
+    let tint: NSColor
 }
 
-// Threads có trong danh sách, nhưng nó là FEED không phải chat: `threads.com/direct` và
-// `/direct/inbox` đều redirect về feed → web Threads không có surface DM (đã kiểm chứng).
-// Giữ vì user yêu cầu; không có hideRules vì không có "chat" nào để tách khỏi chrome.
+// Threads DM nằm ở `/messages/`, KHÔNG phải `/direct/`. Suy diễn theo Instagram là sai:
+// `/direct` và `/direct/inbox` redirect về feed, nên tôi từng kết luận web Threads không
+// có DM. Soi DOM mới thấy nav có `/messages/`.
 let knownServices: [Service] = [
     Service(id: "messenger",
             title: "Messenger",
@@ -57,7 +62,9 @@ let knownServices: [Service] = [
                 HideRule("search button", #"*:has(> input[aria-label="Search Facebook"])"#),
                 HideRule("typeahead x", #"[role="button"][aria-label="Exit typeahead"]"#),
                 HideRule("facebook menu", #"[role="button"][aria-label="Facebook menu"]"#),
-            ]),
+            ],
+            symbol: "message.fill",
+            tint: NSColor(srgbRed: 0.29, green: 0.52, blue: 1.0, alpha: 1)),
     Service(id: "instagram",
             title: "Instagram",
             url: URL(string: "https://www.instagram.com/direct/inbox/")!,
@@ -70,12 +77,25 @@ let knownServices: [Service] = [
                 HideRule("home", #"a[href="/"]"#),
                 HideRule("reels", #"a[href^="/reels/"]"#),
                 HideRule("explore", #"a[href^="/explore/"]"#),
-            ]),
+            ],
+            symbol: "camera.fill",
+            tint: NSColor(srgbRed: 0.91, green: 0.25, blue: 0.55, alpha: 1)),
     Service(id: "threads",
             title: "Threads",
-            url: URL(string: "https://www.threads.com/")!,
-            surface: [SurfaceRule("threads.com"), SurfaceRule("threads.net")],
-            hideRules: []),
+            url: URL(string: "https://www.threads.com/messages/")!,
+            surface: [SurfaceRule("threads.com", "/messages"),
+                      SurfaceRule("threads.net", "/messages")],
+            // Nhận theo href như Instagram: độc lập ngôn ngữ và tài khoản.
+            // Giữ /messages/ và link profile (path chứa username).
+            hideRules: [
+                HideRule("logo", #"a[href="/"]"#),
+                HideRule("search", #"a[href="/search"]"#),
+                HideRule("activity", #"a[href="/activity"]"#),
+                HideRule("insights", #"a[href^="/insights/"]"#),
+                HideRule("saved", #"a[href^="/saved/"]"#),
+            ],
+            symbol: "at",
+            tint: NSColor(srgbRed: 0.34, green: 0.34, blue: 0.38, alpha: 1)),
 ]
 
 /// Cấu hình bằng `FBMESS_SERVICES=messenger,instagram`. Mặc định chỉ messenger để
