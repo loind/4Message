@@ -465,6 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     /// không phải đổi khi lên multi-service.
     private var webView: WKWebView!
     private var statusItem: NSStatusItem!
+    private var serviceMenu: NSMenu?
     private var hotkey: Hotkey?
     private var activity: NSObjectProtocol?
     private var retryDelay: TimeInterval = 2
@@ -644,6 +645,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         case .windows:
             rt.window?.makeKeyAndOrderFront(nil)
         }
+        refreshServiceMenu()
         NSApp.activate(ignoringOtherApps: true)
         benchLog("switch → \(rt.service.id)")
     }
@@ -677,7 +679,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         statusItem?.button?.title = unread.map { " \($0)" } ?? ""
 
         if let title, !title.isEmpty {
-            window?.title = title
+            // Ghép tên service: title của Facebook/Instagram không nói rõ đang ở đâu
+            // khi có nhiều service.
+            window?.title = services.count > 1 ? "\(activeService.title) — \(title)" : title
         }
     }
 
@@ -687,16 +691,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
-        if runtimes.count > 1 {
-            for (i, rt) in runtimes.enumerated() where i < 9 {
-                let item = NSMenuItem(title: rt.service.title,
-                                      action: #selector(switchService(_:)),
-                                      keyEquivalent: String(i + 1))
-                item.tag = i
-                appMenu.addItem(item)
-            }
-            appMenu.addItem(.separator())
-        }
         appMenu.addItem(withTitle: "Thông tin bản build…", action: #selector(showAbout), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Về trang Messenger", action: #selector(goHome), keyEquivalent: "H")
@@ -724,7 +718,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         editItem.submenu = edit
         main.addItem(editItem)
 
+        // Menu top-level cho dễ thấy. Dựng từ `services` (có ngay lúc init) chứ KHÔNG
+        // từ `runtimes` — buildMenu() chạy trước buildUI() nên runtimes còn rỗng, đó
+        // chính là lý do menu service từng không hiện.
+        if services.count > 1 {
+            let svcItem = NSMenuItem()
+            let svc = NSMenu(title: "Service")
+            for (i, service) in services.enumerated() where i < 9 {
+                let item = NSMenuItem(title: service.title,
+                                      action: #selector(switchService(_:)),
+                                      keyEquivalent: String(i + 1))
+                item.tag = i
+                svc.addItem(item)
+            }
+            svcItem.submenu = svc
+            main.addItem(svcItem)
+            serviceMenu = svc
+        }
+
         NSApp.mainMenu = main
+        refreshServiceMenu()
+    }
+
+    /// Dấu tick vào service đang xem — không có thì không biết mình đang ở đâu.
+    private func refreshServiceMenu() {
+        guard let serviceMenu else { return }
+        for item in serviceMenu.items { item.state = item.tag == activeIndex ? .on : .off }
     }
 
     // MARK: Ẩn/hiện — đóng là ẩn, không quit (resident ở menu bar)
