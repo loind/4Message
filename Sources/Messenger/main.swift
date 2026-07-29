@@ -418,7 +418,7 @@ func runSelftest() {
     check(!isInternal(URL(string: "mailto:a@b.c")!), "scheme không có host")
 
     // Link click: chỉ surface Messenger được ở lại trong app.
-    let msg = knownServices[0], ig = knownServices[1]
+    let msg = knownServices[0], ig = knownServices[1], th = knownServices[2]
     check(isSurface(URL(string: "https://www.facebook.com/messages/")!, of: msg), "fb /messages/")
     check(isSurface(URL(string: "https://www.facebook.com/messages")!, of: msg), "fb /messages")
     check(isSurface(URL(string: "https://www.facebook.com/messages/e2ee/t/1")!, of: msg), "fb thread")
@@ -437,6 +437,8 @@ func runSelftest() {
     check(!isSurface(URL(string: "https://www.instagram.com/explore/")!, of: ig), "ig explore → browser")
     check(!isSurface(URL(string: "https://www.instagram.com/direct/")!, of: msg), "ig không thuộc messenger")
     check(!isSurface(URL(string: "https://www.facebook.com/messages/")!, of: ig), "fb không thuộc instagram")
+    check(isSurface(URL(string: "https://www.threads.com/@x")!, of: th), "threads nhận mọi path")
+    check(!isSurface(URL(string: "https://www.threads.com/@x")!, of: ig), "threads không thuộc instagram")
 
     check(resolveServices(nil).map(\.id) == ["messenger"], "không set → chỉ messenger")
     check(resolveServices("").map(\.id) == ["messenger"], "rỗng → chỉ messenger")
@@ -444,9 +446,12 @@ func runSelftest() {
     check(resolveServices("messenger,messenger").map(\.id) == ["messenger"], "loại trùng")
     check(resolveServices("nonsense").map(\.id) == ["messenger"], "id lạ → fallback")
     check(resolveServices("nonsense,instagram").map(\.id) == ["instagram"], "bỏ id lạ, giữ id đúng")
-    // Threads đã bỏ: web không có surface DM (đã kiểm chứng /direct → redirect feed).
-    check(resolveServices("threads").map(\.id) == ["messenger"], "threads không còn là service")
-    check(knownServices.allSatisfy { !$0.hideRules.isEmpty }, "mọi service phải có hide rule")
+    // Threads không có hideRules (là feed, không có chat để tách) → chỉ kiểm tra rule
+    // nào tồn tại thì phải hợp lệ, và id không trùng.
+    check(knownServices.allSatisfy { $0.hideRules.allSatisfy { !$0.selector.isEmpty && !$0.name.isEmpty } },
+          "mọi hide rule phải có name và selector")
+    check(Set(knownServices.map(\.id)).count == knownServices.count, "id service không trùng")
+    check(resolveServices("threads").map(\.id) == ["threads"], "threads là service hợp lệ")
     check(!makeHideChromeJS(serviceId: "x", rules: [HideRule("a", #"a[href="/"]"#)]).isEmpty, "sinh được JS")
     check(Topology.resolve(nil) == .tabs, "topology default tabs")
     check(Topology.resolve("windows") == .windows, "topology windows")
@@ -535,6 +540,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var webView: WKWebView!
     private var statusItem: NSStatusItem!
     private var serviceMenu: NSMenu?
+    /// Rail chọn kênh trong cửa sổ (chỉ ở topology .tabs, khi có >1 service).
+    private var webHost: NSView?
+    private var railButtons: [NSButton] = []
     private var hotkey: Hotkey?
     private var activity: NSObjectProtocol?
     private var retryDelay: TimeInterval = 2
@@ -607,7 +615,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             // 1 cửa sổ, webview không active thì DETACH — điều kiện để
             // inactiveSchedulingPolicy có hiệu lực.
             window = makeWindow(title: runtimes[0].service.title, autosave: "MessengerMain")
-            window.contentView = runtimes[0].webView
+            if runtimes.count > 1 {
+                window.contentView = buildRailContainer()
+                attachWebView(runtimes[0].webView)
+            } else {
+                // 1 service thì không dựng rail — chiếm chỗ mà không chọn được gì.
+                window.contentView = runtimes[0].webView
+            }
             window.makeKeyAndOrderFront(nil)
         case .windows:
             // Mỗi service 1 cửa sổ. Cửa sổ bị che hoàn toàn thì macOS báo occluded và
@@ -624,6 +638,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         webView = runtimes[0].webView
         activeIndex = 0
+    }
+
+    /// Rail dọc bên trái + vùng chứa webview. Auto Layout để resize cửa sổ vẫn đúng.
+    private func buildRailContainer() -> NSView {
+        let container = NSView()
+        let host = NSView()
+        webHost = host
+
+        let rail = NSStackView()
+        rail.orientation = .vertical
+        rail.alignment = .leading
+        rail.spacing = 6
+        rail.edgeInsets = NSEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
+
+        railButtons = services.enumerated().map { i, service in
+            let b = NSButton(title: service.title, target: self, action: #selector(railClicked(_:)))
+            b.tag = i
+            b.bezelStyle = .rounded
+            b.alignment = .left
+            b.translatesAutoresizingMaskIntoConstraints = false
+            b.widthAnchor.constraint(equalToConstant: 112).isActive = true
+            rail.addView(b, in: .top)
+            return b
+        }
+
+        for v in [rail, host] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            rail.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            rail.topAnchor.constraint(equalTo: container.topAnchor),
+            rail.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            rail.widthAnchor.constraint(equalToConstant: 128),
+            host.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
+            host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            host.topAnchor.constraint(equalTo: container.topAnchor),
+            host.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        return container
+    }
+
+    @objc private func railClicked(_ sender: NSButton) { select(index: sender.tag) }
+
+    /// Gắn webview vào vùng chứa. Tháo cái cũ ra trước — đó cũng chính là "detach khỏi
+    /// view hierarchy" mà inactiveSchedulingPolicy cần.
+    private func attachWebView(_ wv: WKWebView) {
+        guard let host = webHost else { return }
+        host.subviews.forEach { $0.removeFromSuperview() }
+        wv.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(wv)
+        NSLayoutConstraint.activate([
+            wv.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            wv.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            wv.topAnchor.constraint(equalTo: host.topAnchor),
+            wv.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+        ])
+    }
+
+    private func refreshRail() {
+        for (i, b) in railButtons.enumerated() {
+            let active = i == activeIndex
+            b.font = .systemFont(ofSize: NSFont.systemFontSize, weight: active ? .bold : .regular)
+            b.bezelColor = active ? .controlAccentColor : nil
+        }
     }
 
     private func makeWindow(title: String, autosave: String) -> NSWindow {
@@ -707,13 +786,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         switch topology {
         case .tabs:
-            window.contentView = rt.webView
+            if webHost != nil { attachWebView(rt.webView) } else { window.contentView = rt.webView }
             window.title = rt.webView.title ?? rt.service.title
             window.makeKeyAndOrderFront(nil)
         case .windows:
             rt.window?.makeKeyAndOrderFront(nil)
         }
         refreshServiceMenu()
+        refreshRail()
         NSApp.activate(ignoringOtherApps: true)
         benchLog("switch → \(rt.service.id)")
     }
@@ -737,6 +817,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
            let own = rt.window, let title, !title.isEmpty {
             own.title = title
         }
+        // Số chưa đọc của TỪNG service lên rail — đây là lý do chính để có rail:
+        // thấy service khác có tin mới mà không phải bấm qua.
+        if let i = runtimes.firstIndex(where: { $0.webView === source }), i < railButtons.count {
+            let unread = unreadBadge(from: title)
+            railButtons[i].title = unread.map { "\(services[i].title)  \($0)" } ?? services[i].title
+        }
+
         // Badge dock/menu bar chỉ phản ánh service đang active — không lọc thì service
         // ẩn sẽ ghi đè số của service đang xem.
         guard source === webView else { return }
@@ -867,11 +954,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         }
         window.orderOut(nil)
         // Tháo webView khỏi view hierarchy để inactiveSchedulingPolicy có hiệu lực.
-        if mode.detachesWhenHidden, window.contentView === webView {
+        guard mode.detachesWhenHidden else { return benchLog("hide: giữ webView attached") }
+        if let host = webHost, webView.superview === host {
+            webView.removeFromSuperview()
+            benchLog("hide: detached webView khỏi rail host")
+        } else if window.contentView === webView {
             window.contentView = placeholder
             benchLog("hide: detached webView (superview=\(webView.superview == nil ? "nil" : "còn"))")
-        } else {
-            benchLog("hide: giữ webView attached")
         }
     }
 
@@ -881,7 +970,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        if window.contentView !== webView {
+        if let host = webHost {
+            if webView.superview !== host { attachWebView(webView); benchLog("show: reattached webView") }
+        } else if window.contentView !== webView {
             window.contentView = webView
             benchLog("show: reattached webView")
         }

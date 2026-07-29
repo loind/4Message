@@ -36,9 +36,9 @@ struct Service: Equatable {
     let hideRules: [HideRule]
 }
 
-// Threads KHÔNG có trong danh sách: `threads.com/direct` và `/direct/inbox` đều redirect
-// về feed → web Threads không có surface DM. Nó không thuộc một app chat.
-// Đã kiểm chứng, không phải suy đoán.
+// Threads có trong danh sách, nhưng nó là FEED không phải chat: `threads.com/direct` và
+// `/direct/inbox` đều redirect về feed → web Threads không có surface DM (đã kiểm chứng).
+// Giữ vì user yêu cầu; không có hideRules vì không có "chat" nào để tách khỏi chrome.
 let knownServices: [Service] = [
     Service(id: "messenger",
             title: "Messenger",
@@ -71,6 +71,11 @@ let knownServices: [Service] = [
                 HideRule("reels", #"a[href^="/reels/"]"#),
                 HideRule("explore", #"a[href^="/explore/"]"#),
             ]),
+    Service(id: "threads",
+            title: "Threads",
+            url: URL(string: "https://www.threads.com/")!,
+            surface: [SurfaceRule("threads.com"), SurfaceRule("threads.net")],
+            hideRules: []),
 ]
 
 /// Cấu hình bằng `FBMESS_SERVICES=messenger,instagram`. Mặc định chỉ messenger để

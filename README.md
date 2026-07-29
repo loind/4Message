@@ -61,13 +61,25 @@ của messenger.com nằm nguyên. Số liệu đầy đủ:
 
 ## Service và ẩn chrome
 
-`FBMESS_SERVICES=messenger,instagram` (mặc định chỉ `messenger`). Đổi service bằng menu
-**Service** hoặc ⌘1/⌘2. Mỗi service là một origin riêng → cookie, IndexedDB, device E2EE
-riêng; phải đăng nhập từng service.
+`FBMESS_SERVICES=messenger,instagram,threads` (mặc định chỉ `messenger`). Mỗi service là
+một origin riêng → cookie, IndexedDB, device E2EE riêng; phải đăng nhập từng service.
 
-**Threads không có trong danh sách.** `threads.com/direct` và `/direct/inbox` đều redirect
-về feed → web Threads không có surface DM, nên nó không thuộc một app chat. Đã kiểm chứng
-bằng đo, không suy đoán.
+Ba cách đổi kênh:
+
+| Cách | Ghi chú |
+| --- | --- |
+| **Rail dọc trong cửa sổ** | Hiện khi có >1 service. Kênh đang xem in đậm + nền accent |
+| Menu **Service** | Trên thanh menu, có dấu tick |
+| ⌘1 / ⌘2 / ⌘3 | |
+
+Rail hiện **số chưa đọc của từng kênh** — đó là lý do chính để có nó, thấy kênh khác có
+tin mới mà không phải bấm qua. Với 1 service thì rail không dựng (chiếm chỗ mà không chọn
+được gì).
+
+**Threads là FEED, không phải chat.** `threads.com/direct` và `/direct/inbox` đều redirect
+về feed → web Threads không có surface DM (đã kiểm chứng). Giữ trong danh sách vì có thể
+bạn vẫn muốn đọc feed, nhưng nó không có `hideRules` vì không có "chat" nào để tách khỏi
+chrome.
 
 Rule ẩn chrome nằm ở `Service.hideRules` (`Sources/Messenger/Services.swift`), riêng từng
 service vì DOM hai site khác nhau hoàn toàn:
