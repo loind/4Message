@@ -15,6 +15,13 @@ struct SurfaceRule: Equatable {
     }
 }
 
+/// Một phần chrome cần ẩn. `name` chỉ để self-check báo rule nào khớp 0 element.
+struct HideRule: Equatable {
+    let name: String
+    let selector: String
+    init(_ name: String, _ selector: String) { self.name = name; self.selector = selector }
+}
+
 /// Một service được wrap. Mỗi service là một origin riêng → cookie, IndexedDB, và
 /// device E2EE riêng biệt. Không chia sẻ gì với nhau.
 struct Service: Equatable {
@@ -24,23 +31,46 @@ struct Service: Equatable {
     /// Link user click nằm ngoài các rule này → mở browser, không giữ trong app.
     /// Tách theo service để link Instagram không mở trong cửa sổ Messenger.
     let surface: [SurfaceRule]
+    /// CSS ẩn chrome. Phải riêng từng service: DOM của Facebook và Instagram khác nhau
+    /// hoàn toàn, dùng chung selector là ẩn nhầm hoặc không ẩn được gì.
+    let hideRules: [HideRule]
 }
 
+// Threads KHÔNG có trong danh sách: `threads.com/direct` và `/direct/inbox` đều redirect
+// về feed → web Threads không có surface DM. Nó không thuộc một app chat.
+// Đã kiểm chứng, không phải suy đoán.
 let knownServices: [Service] = [
     Service(id: "messenger",
             title: "Messenger",
             url: URL(string: "https://www.facebook.com/messages/")!,
             surface: [SurfaceRule("facebook.com", "/messages"),
                       SurfaceRule("messenger.com"),
-                      SurfaceRule("m.me")]),
+                      SurfaceRule("m.me")],
+            // Nhận thanh tab theo href nên độc lập ngôn ngữ; ba rule còn lại chỉ phân
+            // biệt được qua aria-label nên KHỚP CHÍNH XÁC — match kiểu `*=` từng trúng
+            // cả một tin nhắn, vì nội dung tin nhắn cũng vào aria-label.
+            hideRules: [
+                HideRule("tab bar", #"[role="navigation"]:has(a[href^="/marketplace/"])"#),
+                HideRule("search input", #"input[aria-label="Search Facebook"]"#),
+                // Ẩn <input> thôi chưa đủ: nút tròn nhìn thấy được là <label> bọc ngoài.
+                // BẮT BUỘC có `> input` — thiếu dấu `>` thì khớp mọi ancestor tới <body>.
+                HideRule("search button", #"*:has(> input[aria-label="Search Facebook"])"#),
+                HideRule("typeahead x", #"[role="button"][aria-label="Exit typeahead"]"#),
+                HideRule("facebook menu", #"[role="button"][aria-label="Facebook menu"]"#),
+            ]),
     Service(id: "instagram",
             title: "Instagram",
             url: URL(string: "https://www.instagram.com/direct/inbox/")!,
-            surface: [SurfaceRule("instagram.com", "/direct")]),
-    Service(id: "threads",
-            title: "Threads",
-            url: URL(string: "https://www.threads.com/")!,
-            surface: [SurfaceRule("threads.com"), SurfaceRule("threads.net")]),
+            surface: [SurfaceRule("instagram.com", "/direct")],
+            // Rail bên trái nằm NGOÀI `[role="navigation"]` — trên Instagram role đó là
+            // panel danh sách hội thoại (dòng chat 362x72). Nhắm vào nó là xoá sạch chat.
+            // Nên nhận theo href, độc lập ngôn ngữ và độc lập tài khoản.
+            // Không ẩn link profile: path chứa username nên không hardcode được.
+            hideRules: [
+                HideRule("home", #"a[href="/"]"#),
+                HideRule("reels", #"a[href^="/reels/"]"#),
+                HideRule("explore", #"a[href^="/explore/"]"#),
+            ]),
 ]
 
 /// Cấu hình bằng `FBMESS_SERVICES=messenger,instagram`. Mặc định chỉ messenger để

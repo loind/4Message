@@ -59,76 +59,57 @@ lại — dấu hiệu Meta chỉ còn đầu tư một surface. Đánh đổi: 
 của messenger.com nằm nguyên. Số liệu đầy đủ:
 `docs/decisions/2026-07-28-facebook-com-surface.md`.
 
-## Ẩn chrome Facebook
+## Service và ẩn chrome
 
-App tự ẩn 4 thứ trên surface facebook.com (`Sources/Messenger/Bridge.swift`, `hideChromeJS`):
+`FBMESS_SERVICES=messenger,instagram` (mặc định chỉ `messenger`). Đổi service bằng menu
+**Service** hoặc ⌘1/⌘2. Mỗi service là một origin riêng → cookie, IndexedDB, device E2EE
+riêng; phải đăng nhập từng service.
 
-| Ẩn | Selector |
-| --- | --- |
-| Thanh tab Home/Reels/Marketplace/Groups/Gaming | `[role="navigation"]:has(a[href^="/marketplace/"])` |
-| Ô nhập tìm kiếm Facebook | `input[aria-label="Search Facebook"]` |
-| Nút tròn kính lúp (wrapper của ô trên) | `*:has(> input[aria-label="Search Facebook"])` |
-| Nút X của typeahead (UI chết sau khi ẩn search) | `[role="button"][aria-label="Exit typeahead"]` |
-| Nút Facebook menu (9 chấm) | `[role="button"][aria-label="Facebook menu"]` |
+**Threads không có trong danh sách.** `threads.com/direct` và `/direct/inbox` đều redirect
+về feed → web Threads không có surface DM, nên nó không thuộc một app chat. Đã kiểm chứng
+bằng đo, không suy đoán.
 
-Ẩn `<input>` thôi là chưa đủ — nút nhìn thấy được là `<label>` bọc ngoài (40×40,
-`border-radius: 50px`) chứa icon kính lúp. **Bắt buộc dùng `> input`** trong `:has()`:
-thiếu dấu `>` thì nó khớp mọi ancestor tới tận `<body>` và ẩn sạch trang.
+Rule ẩn chrome nằm ở `Service.hideRules` (`Sources/Messenger/Services.swift`), riêng từng
+service vì DOM hai site khác nhau hoàn toàn:
 
-Giữ lại: Notifications, Your profile, logo Facebook, và **toàn bộ Messenger** (thread list,
-ô `Search Messenger`).
+| Service | Ẩn | Selector |
+| --- | --- | --- |
+| Messenger | Thanh tab Home/Reels/Marketplace/Groups/Gaming | `[role="navigation"]:has(a[href^="/marketplace/"])` |
+| Messenger | Ô nhập tìm kiếm | `input[aria-label="Search Facebook"]` |
+| Messenger | Nút tròn kính lúp (wrapper của ô trên) | `*:has(> input[aria-label="Search Facebook"])` |
+| Messenger | Nút X typeahead (UI chết sau khi ẩn search) | `[role="button"][aria-label="Exit typeahead"]` |
+| Messenger | Nút Facebook menu (9 chấm) | `[role="button"][aria-label="Facebook menu"]` |
+| Instagram | Home | `a[href="/"]` |
+| Instagram | Reels | `a[href^="/reels/"]` |
+| Instagram | Explore | `a[href^="/explore/"]` |
 
-**Việc này KHÔNG giảm memory hay giảm load.** DOM node vẫn tồn tại, React vẫn render và
-diff, request đã chạy vẫn chạy. Lợi ích thật là chặn lỡ tay click vào Reels/Marketplace —
-những surface đó load rất nặng vào cùng WebContent process, mà memory thì ratchet lên rồi
-không trả lại nhanh.
+Giữ lại: danh sách hội thoại, `Search Messenger`, `New message`, `/direct/requests/`,
+link profile (path chứa username nên không hardcode được), Notifications, Your profile.
 
-### Ba cái bẫy selector đã gặp
+**Ẩn CSS KHÔNG giảm memory** — DOM node vẫn tồn tại, React vẫn render và diff. Lợi ích thật
+là chặn lỡ tay click vào Reels/Explore/Marketplace, những surface load rất nặng vào cùng
+WebContent process.
 
-1. **`[role="navigation"]` trần** — trang này có **3** vùng navigation: thanh tab, account
-   controls, và **thread list**. Ẩn hết là mất danh sách hội thoại.
-2. **`input[role="combobox"]`** — khớp cả ô `Search Messenger` của chính Messenger.
-3. **`[aria-label*="Facebook" i]`** — khớp cả **một tin nhắn**, vì nội dung tin nhắn cũng
+### Bốn cái bẫy selector đã gặp
+
+1. **`[role="navigation"]` trên facebook.com** — có 3 vùng: thanh tab, account controls, và
+   **thread list**. Ẩn hết là mất danh sách hội thoại.
+2. **`[role="navigation"]` trên instagram.com** — role đó là **chính panel danh sách hội
+   thoại** (dòng chat 362×72), không phải rail bên trái. Rail nằm ngoài nó.
+3. **`input[role="combobox"]`** — khớp cả ô `Search Messenger` của chính Messenger.
+4. **`[aria-label*="Facebook" i]`** — khớp cả **một tin nhắn**, vì nội dung tin nhắn cũng
    được đưa vào `aria-label`.
 
-Vì vậy: thanh tab nhận theo `href` (độc lập ngôn ngữ), ba cái còn lại dùng **aria-label
-khớp chính xác**. Khớp chính xác fail-safe — Facebook đổi label thì không ẩn được (vô hại),
-chứ không ẩn nhầm thứ đang cần. Đánh đổi: phụ thuộc ngôn ngữ UI của Facebook.
+Vì vậy: ưu tiên nhận theo `href` (độc lập ngôn ngữ và độc lập tài khoản); chỉ khi không có
+href mới dùng **aria-label khớp chính xác** — khớp chính xác fail-safe, site đổi label thì
+không ẩn được (vô hại) chứ không ẩn nhầm thứ đang cần.
 
 ### An toàn
 
-- **Self-check** — 8 giây sau khi load, app đếm element khớp từng rule và log cảnh báo cho
-  rule nào khớp 0, để CSS vỡ không âm thầm.
-- **Kill switch** — `FBMESS_KEEP_FB_CHROME=1` tắt toàn bộ, không cần rebuild.
-
-## Biết đang chạy bản nào
-
-Từng xảy ra chuyện một máy chạy bản cũ thiếu fix mà không ai biết. Commit là thứ định
-danh duy nhất đáng tin, nên `build.sh` nhúng nó vào `Info.plist` lúc đóng bundle.
-
-Kiểm tra không cần mở GUI — dùng được cả trên máy khác:
-
-```bash
-"FB Mess.app/Contents/MacOS/Messenger" --version
-```
-
-```
-FB Mess 0.1.0 (build 7)
-commit   47c03c3
-built    2026-07-28T13:18:36Z
-surface  https://www.facebook.com/messages/
-mode     baseline
-macOS    26.5.2 (25F84)
-```
-
-Trong app: menu **Thông tin bản build…**, có nút Copy để dán vào báo lỗi. Cùng nội dung
-đó cũng được ghi ra stderr ngay khi app khởi động — đọc log mà không biết bản nào sinh ra
-nó thì vô dụng.
-
-`CFBundleVersion` = `git rev-list --count HEAD`, nên số build tăng đơn điệu theo commit.
-
-Nếu build khi working tree chưa commit, `build.sh` in cảnh báo và `--version` đánh dấu
-**DIRTY** — bản đó không tái tạo được từ git.
+- **Self-check** — 8 giây sau khi load, đếm element khớp từng rule và log cảnh báo cho rule
+  nào khớp 0, kèm tên service.
+- **Kill switch** — `FBMESS_KEEP_FB_CHROME=1` tắt toàn bộ, không cần rebuild. Cũng là cách
+  chạy A/B để kiểm tra rule có phá layout chat không.
 
 ## Đo hiệu năng — so với Franz
 

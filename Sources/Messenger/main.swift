@@ -244,6 +244,72 @@ let navProbeJS = #"""
 })();
 """#
 
+/// Probe cấu trúc TỔNG QUÁT, không giả định layout.
+///
+/// `navProbeJS` được viết cho Facebook: chỉ quét dải `top < 60px` và landmark
+/// `[role="banner"]`/`[role="navigation"]`. Instagram dùng sidebar DỌC nên probe đó trả
+/// về rỗng hoàn toàn. Probe này liệt kê link theo `href` ở mọi vị trí — href là tín hiệu
+/// độc lập ngôn ngữ, đúng thứ cần để viết selector bền.
+///
+/// Không đọc nội dung hội thoại: bỏ qua mọi thứ trong `[role="grid"]`, và chỉ lấy
+/// pathname + aria-label của phần tử điều hướng.
+let layoutProbeJS = #"""
+(() => {
+  const clip = (s) => (s || '').trim().slice(0, 26);
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    return `${Math.round(r.width)}x${Math.round(r.height)}@${Math.round(r.left)},${Math.round(r.top)}`;
+  };
+  const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 8 && r.height > 8 };
+
+  // Link điều hướng: nav rail của Instagram/Threads là các <a href>.
+  const links = [...document.querySelectorAll('a[href]')]
+    .filter(el => !el.closest('[role="grid"]') && vis(el))
+    .map(el => {
+      let path = '';
+      try { path = new URL(el.href, location.origin).pathname } catch {}
+      return { path: path.slice(0, 24), label: clip(el.getAttribute('aria-label')), rect: box(el) };
+    })
+    // Bỏ link trùng path để danh sách đọc được.
+    .filter((e, i, a) => a.findIndex(x => x.path === e.path) === i)
+    .slice(0, 26);
+
+  // Có những role nào, mỗi role bao nhiêu phần tử — để biết landmark nào dùng được.
+  const roles = {};
+  document.querySelectorAll('[role]').forEach(el => {
+    const r = el.getAttribute('role');
+    if (!vis(el)) return;
+    roles[r] = (roles[r] || 0) + 1;
+  });
+
+  // Nút không phải link (icon-only) ngoài vùng hội thoại.
+  const buttons = [...document.querySelectorAll('[role="button"], button')]
+    .filter(el => !el.closest('[role="grid"], [role="main"]') && vis(el))
+    .map(el => ({ label: clip(el.getAttribute('aria-label')), rect: box(el) }))
+    .filter(e => e.label)
+    .slice(0, 18);
+
+  // Con trực tiếp của vùng navigation — để biết rail gồm những gì (nhiều item là
+  // [role="button"] không có aria-label nên không nhận diện được qua label).
+  const navKids = [...document.querySelectorAll('[role="navigation"] a, [role="navigation"] [role="button"], [role="navigation"] svg')]
+    .filter(vis).slice(0, 20)
+    .map(el => {
+      let path = '';
+      try { if (el.href) path = new URL(el.href, location.origin).pathname } catch {}
+      return { tag: el.tagName.toLowerCase(), role: el.getAttribute('role') || '',
+               path: path.slice(0, 22), label: clip(el.getAttribute('aria-label')), rect: box(el) };
+    });
+
+  // Mọi button có label, KHÔNG loại trừ [role="main"] — Threads không có landmark main.
+  const allButtons = [...document.querySelectorAll('[role="button"], button')]
+    .filter(el => !el.closest('[role="grid"]') && vis(el))
+    .map(el => ({ label: clip(el.getAttribute('aria-label')), rect: box(el) }))
+    .filter(e => e.label).slice(0, 20);
+
+  return JSON.stringify({ links, roles, buttons, navKids, allButtons });
+})();
+"""#
+
 /// Bench: tự ẩn cửa sổ sau N giây để đo trạng thái hidden mà không cần thao tác tay.
 let benchHideAfter = TimeInterval(ProcessInfo.processInfo.environment["FBMESS_BENCH_HIDE_AFTER"] ?? "") ?? 0
 
@@ -352,7 +418,7 @@ func runSelftest() {
     check(!isInternal(URL(string: "mailto:a@b.c")!), "scheme không có host")
 
     // Link click: chỉ surface Messenger được ở lại trong app.
-    let msg = knownServices[0], ig = knownServices[1], th = knownServices[2]
+    let msg = knownServices[0], ig = knownServices[1]
     check(isSurface(URL(string: "https://www.facebook.com/messages/")!, of: msg), "fb /messages/")
     check(isSurface(URL(string: "https://www.facebook.com/messages")!, of: msg), "fb /messages")
     check(isSurface(URL(string: "https://www.facebook.com/messages/e2ee/t/1")!, of: msg), "fb thread")
@@ -371,7 +437,6 @@ func runSelftest() {
     check(!isSurface(URL(string: "https://www.instagram.com/explore/")!, of: ig), "ig explore → browser")
     check(!isSurface(URL(string: "https://www.instagram.com/direct/")!, of: msg), "ig không thuộc messenger")
     check(!isSurface(URL(string: "https://www.facebook.com/messages/")!, of: ig), "fb không thuộc instagram")
-    check(isSurface(URL(string: "https://www.threads.com/@x")!, of: th), "threads mọi path")
 
     check(resolveServices(nil).map(\.id) == ["messenger"], "không set → chỉ messenger")
     check(resolveServices("").map(\.id) == ["messenger"], "rỗng → chỉ messenger")
@@ -379,6 +444,10 @@ func runSelftest() {
     check(resolveServices("messenger,messenger").map(\.id) == ["messenger"], "loại trùng")
     check(resolveServices("nonsense").map(\.id) == ["messenger"], "id lạ → fallback")
     check(resolveServices("nonsense,instagram").map(\.id) == ["instagram"], "bỏ id lạ, giữ id đúng")
+    // Threads đã bỏ: web không có surface DM (đã kiểm chứng /direct → redirect feed).
+    check(resolveServices("threads").map(\.id) == ["messenger"], "threads không còn là service")
+    check(knownServices.allSatisfy { !$0.hideRules.isEmpty }, "mọi service phải có hide rule")
+    check(!makeHideChromeJS(serviceId: "x", rules: [HideRule("a", #"a[href="/"]"#)]).isEmpty, "sinh được JS")
     check(Topology.resolve(nil) == .tabs, "topology default tabs")
     check(Topology.resolve("windows") == .windows, "topology windows")
     check(Topology.resolve("rác") == .tabs, "topology rác → tabs")
@@ -586,13 +655,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         config.userContentController.addUserScript(
             WKUserScript(source: bridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         )
-        // CSS ẩn chrome viết riêng cho DOM của facebook.com — inject vào Instagram hay
-        // Threads là vô nghĩa, và selector `*:has(> input[...])` không nên chạy ở nơi
-        // chưa kiểm chứng. Mỗi service cần rule riêng, làm sau khi chốt topology.
-        if service.id == "messenger",
+        // Rule ẩn chrome riêng từng service (Service.hideRules).
+        if !service.hideRules.isEmpty,
            ProcessInfo.processInfo.environment["FBMESS_KEEP_FB_CHROME"] != "1" {
             config.userContentController.addUserScript(
-                WKUserScript(source: hideChromeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+                WKUserScript(source: makeHideChromeJS(serviceId: service.id, rules: service.hideRules),
+                             injectionTime: .atDocumentStart, forMainFrameOnly: true)
             )
         }
 
@@ -840,12 +908,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         guard let payload = message.body as? [String: Any] else { return }
 
         if payload["kind"] as? String == "chrome" {
+            let svc = payload["service"] as? String ?? "?"
             let hits = payload["hits"] as? String ?? "?"
             let misses = payload["misses"] as? String ?? ""
             if misses.isEmpty {
-                benchLog("chrome: \(hits)")
+                benchLog("[\(svc)] chrome: \(hits)")
             } else {
-                benchLog("CẢNH BÁO chrome: rule không khớp gì → [\(misses)]. "
+                benchLog("[\(svc)] CẢNH BÁO chrome: rule không khớp gì → [\(misses)]. "
                          + "Facebook có thể đã đổi cấu trúc hoặc ngôn ngữ UI. Chi tiết: \(hits)")
             }
             return
@@ -936,34 +1005,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         webView.reload()
     }
 
-    private var loggedDiagnostics = false
+    /// Set thay vì Bool: với nhiều service, một flag chung khiến chỉ webview load xong
+    /// đầu tiên được probe, hai service còn lại mất chẩn đoán.
+    private var diagnosed = Set<ObjectIdentifier>()
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         retryDelay = 2
 
-        guard diagnosticsEnabled, !loggedDiagnostics else { return }
-        loggedDiagnostics = true
+        guard diagnosticsEnabled else { return }
+        let key = ObjectIdentifier(webView)
+        guard !diagnosed.contains(key) else { return }
+        diagnosed.insert(key)
+        let svc = service(for: webView).id
 
-        webView.evaluateJavaScript("navigator.userAgent") { value, _ in
-            benchLog("UA=\(value as? String ?? "?")")
+        let target = webView   // KHÔNG dùng self.webView: đó là service đang active
+        target.evaluateJavaScript("navigator.userAgent") { value, _ in
+            benchLog("[\(svc)] UA=\(value as? String ?? "?")")
         }
-        webView.evaluateJavaScript("[location.href, document.title].join(' | ')") { value, _ in
-            benchLog("page=\(value as? String ?? "?")")
+        target.evaluateJavaScript("[location.href, document.title].join(' | ')") { value, _ in
+            benchLog("[\(svc)] page=\(value as? String ?? "?")")
         }
 
         // Probe nhiều mốc: trang có thể còn redirect hoặc chưa render list lúc didFinish.
         // Chỉ đếm element và tìm keyword trạng thái — KHÔNG đọc nội dung tin nhắn.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 40) { [weak self] in
-            self?.webView.evaluateJavaScript(navProbeJS) { value, error in
-                benchLog("nav=\(value as? String ?? "lỗi \(String(describing: error))")")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 40) {
+            target.evaluateJavaScript(navProbeJS) { value, error in
+                benchLog("[\(svc)] nav=\(value as? String ?? "lỗi \(String(describing: error))")")
+            }
+            target.evaluateJavaScript(layoutProbeJS) { value, error in
+                benchLog("[\(svc)] layout=\(value as? String ?? "lỗi \(String(describing: error))")")
             }
         }
 
         for delay in [10.0, 25.0, 45.0] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                self?.webView.evaluateJavaScript("location.href") { url, _ in
-                    self?.webView.evaluateJavaScript(pageStateProbeJS) { value, error in
-                        benchLog("t+\(Int(delay))s url=\(url as? String ?? "?") "
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                target.evaluateJavaScript("location.href") { url, _ in
+                    target.evaluateJavaScript(pageStateProbeJS) { value, error in
+                        benchLog("[\(svc)] t+\(Int(delay))s url=\(url as? String ?? "?") "
                                  + "state=\(value as? String ?? "lỗi \(String(describing: error))")")
                     }
                 }
