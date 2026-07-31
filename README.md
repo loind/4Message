@@ -1,10 +1,18 @@
 # FB Mess
 
-Client Messenger native cho macOS. Swift + AppKit host một `WKWebView` load `messenger.com`.
-Thay thế Franz cho use case chat Facebook: nhẹ hơn, khởi động tức thì, không quảng cáo Pro.
+Client chat native cho macOS: **Messenger, Instagram DM, Threads DM** trong một app.
+Swift + AppKit, mỗi service là một `WKWebView` riêng. Thay thế Franz: nhẹ hơn, khởi động
+tức thì, không quảng cáo Pro.
 
-Không reverse-engineer protocol của Facebook — dùng đúng web app chính thức, nên không
-có rủi ro khoá tài khoản.
+Không reverse-engineer protocol của Meta — dùng đúng web app chính thức, nên không có rủi
+ro khoá tài khoản. Đánh đổi: memory là của web app, không sửa được từ phía shell
+(chi tiết ở `docs/perf-process.md`).
+
+| Tài liệu | Nội dung |
+| --- | --- |
+| `docs/perf-process.md` | Quy trình đo hiệu năng + các hướng tối ưu đã thử và thất bại |
+| `docs/ui-discipline.md` | Kỷ luật soi DOM và AppKit — các bẫy selector/layout đã mắc |
+| `docs/decisions/` | Quyết định kiến trúc kèm số liệu |
 
 ## Build
 
@@ -148,12 +156,40 @@ không ẩn được (vô hại) chứ không ẩn nhầm thứ đang cần.
 - **Kill switch** — `FBMESS_KEEP_FB_CHROME=1` tắt toàn bộ, không cần rebuild. Cũng là cách
   chạy A/B để kiểm tra rule có phá layout chat không.
 
-## Đo hiệu năng — so với Franz
+## Tham chiếu env var
 
-```bash
-./measure.sh "FB Mess"
-./measure.sh Franz
-```
+Tất cả đều là knob để thử/đo, không cần rebuild. Mặc định là hành vi ship.
+
+| Env var | Mặc định | Tác dụng |
+| --- | --- | --- |
+| `FBMESS_SERVICES` | `messenger` | Danh sách kênh, phân cách bằng dấu phẩy. Id lạ bị bỏ |
+| `FBMESS_TOPOLOGY` | `tabs` | `tabs` = 1 cửa sổ đổi webview, `windows` = mỗi kênh 1 cửa sổ |
+| `FBMESS_URL` | theo service | Ghi đè URL khởi động. Chỉ nhận `https` + host trong `internalHosts` |
+| `FBMESS_KEEP_FB_CHROME` | *(tắt)* | `1` = không ẩn chrome. Cũng dùng để chạy A/B kiểm tra rule |
+| `FBMESS_DIAG` | *(tắt)* | `1` = bật probe chẩn đoán DOM ra stderr |
+| `FBMESS_MODE` | `baseline` | `baseline` / `throttle` / `suspend` / `block` — xem `docs/perf-process.md` |
+| `FBMESS_UA` | *(tắt)* | `mobile` hoặc chuỗi UA đầy đủ. **Đã đo: không có surface nhẹ hơn** |
+| `FBMESS_CONTENT_MODE` | `recommended` | `mobile` / `desktop`. **Đã đo: không cải thiện** |
+| `FBMESS_WINDOW` | `1100x760` | Kích thước cửa sổ, dạng `WxH`. Cửa sổ hẹp **không** giảm memory |
+| `FBMESS_BENCH_HIDE_AFTER` | `0` | Giây rồi tự ẩn cửa sổ — chỉ dùng cho `bench.sh` |
+
+Ba knob cuối cùng của phần đo hiệu năng đều cho kết quả **âm** và được giữ lại để không
+phải thử lại; số liệu ở `docs/perf-process.md`.
+
+## Script
+
+| Script | Việc |
+| --- | --- |
+| `./build.sh` | Build + selftest + đóng `.app` + ad-hoc sign. `RELEASE_TUNE=fast` để thử flag tối ưu |
+| `./measure.sh` | Đo memory/CPU, có `--watch` theo dõi liên tục |
+| `./bench.sh` | Bench theo giao thức cố định để so phương án |
+| `./startup.sh` | So thời gian khởi động giữa các mức tối ưu |
+| `sudo ./pressure-test.sh` | Simulate memory pressure để phân biệt cache với leak |
+| `./make-icon.sh` | Sinh `Resources/AppIcon.icns` từ `tools/make-icon.swift` |
+| `./preview-rail.sh` | Render rail ra PNG (light + dark) để xem thiết kế |
+| `./docs-check.sh` | Kiểm tra docs không lệch code: env var và script đều phải được nhắc |
+
+## Đo hiệu năng — so với Franz
 
 ```bash
 ./measure.sh "FB Mess"                       # chụp 1 thời điểm
