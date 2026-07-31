@@ -1,85 +1,84 @@
 // Render rail chọn kênh ra PNG để xem thiết kế mà không cần quyền Screen Recording.
 //
-//   swift tools/preview-rail.swift <out.png>
+//   ./preview-rail.sh out.png
 //
-// Dựng ĐÚNG các control AppKit thật (NSButton + SF Symbol + NSTextField badge) rồi vẽ
-// offscreen. Đây là bản dựng lại theo cùng spec, KHÔNG phải ảnh chụp app đang chạy —
-// nên nó có thể lệch nếu spec trong main.swift đổi mà file này không đổi theo.
+// Dùng ĐÚNG `Rail.make` mà app dùng, KHÔNG dựng lại. Bản trước dựng lại bằng frame thủ
+// công nên luôn có khoảng cách giữa tile, che mất đúng lỗi tile dính liền của app.
+//
+// Render CẢ light VÀ dark cạnh nhau: bản trước chỉ render một appearance (dark mặc định
+// của process) nên thiết kế nhạt toẹt ở light mode mà không phát hiện được.
 
 import AppKit
 
 let outPath = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "rail.png"
-
-// Cùng spec với main.swift: 44x44, cornerRadius 10, rail rộng 60, spacing 8.
-struct Item { let symbol: String; let tint: NSColor; let title: String; let unread: String? }
-let items = [
-    Item(symbol: "message.fill", tint: NSColor(srgbRed: 0.29, green: 0.52, blue: 1.0, alpha: 1),
-         title: "Messenger", unread: "3"),
-    Item(symbol: "camera.fill", tint: NSColor(srgbRed: 0.91, green: 0.25, blue: 0.55, alpha: 1),
-         title: "Instagram", unread: nil),
-    Item(symbol: "at", tint: NSColor(srgbRed: 0.34, green: 0.34, blue: 0.38, alpha: 1),
-         title: "Threads", unread: "9+"),
-]
+let services = knownServices              // đúng danh sách app dùng
+let unread: [String?] = ["3", nil, "9+"]  // giả lập để thấy badge
 let activeIndex = 0
 
-let railWidth: CGFloat = 64
-let tile: CGFloat = 48
-let gap: CGFloat = 6
-let height: CGFloat = 12 + CGFloat(items.count) * tile + CGFloat(items.count - 1) * gap + 12
-
-let container = NSView(frame: NSRect(x: 0, y: 0, width: railWidth, height: height))
-container.wantsLayer = true
-// Nền giống vùng sidebar của macOS để đánh giá tương phản thực tế.
-container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-
-for (i, item) in items.enumerated() {
-    let y = height - 12 - CGFloat(i + 1) * tile - CGFloat(i) * gap
-    let b = NSButton(frame: NSRect(x: (railWidth - tile) / 2, y: y, width: tile, height: tile))
-    b.title = ""
-    b.isBordered = false
-    b.imagePosition = .imageOnly
-    // Không set pointSize thì SF Symbol render ở cỡ mặc định, nhỏ hẳn so với ô.
-    b.image = NSImage(systemSymbolName: item.symbol, accessibilityDescription: item.title)?
-        .withSymbolConfiguration(.init(pointSize: 22, weight: .semibold))
-    b.image?.isTemplate = true
-    // Glyph TRẮNG trên tile màu thương hiệu: dễ nhận hơn glyph màu trên tile xám, và
-    // inactive không còn nổi hơn active.
-    b.contentTintColor = NSColor.white.withAlphaComponent(i == activeIndex ? 1.0 : 0.8)
-    b.wantsLayer = true
-    b.layer?.cornerRadius = 12
-    // Tile cho MỌI item, không chỉ active — inactive để trong suốt thì icon trông như
-    // glyph rời, không ra dạng launcher.
-    b.layer?.backgroundColor = item.tint.withAlphaComponent(i == activeIndex ? 1.0 : 0.45).cgColor
-    if i == activeIndex {
-        // Viền sáng mảnh để phân biệt active mà không đổi màu thương hiệu.
-        b.layer?.borderWidth = 2
-        b.layer?.borderColor = NSColor.white.withAlphaComponent(0.85).cgColor
+func renderRail(appearance: NSAppearance) -> NSBitmapImageRep {
+    let build = Rail.make(services: services, target: nil, action: nil)
+    for (i, u) in unread.enumerated() where i < build.badges.count {
+        build.badges[i].stringValue = u ?? ""
+        build.badges[i].isHidden = (u == nil)
     }
-    container.addSubview(b)
 
-    if let unread = item.unread {
-        let badge = NSTextField(labelWithString: unread)
-        badge.font = .systemFont(ofSize: 9.5, weight: .bold)
-        badge.textColor = .white
-        badge.alignment = .center
-        badge.wantsLayer = true
-        badge.layer?.backgroundColor = NSColor.systemRed.cgColor
-        badge.layer?.cornerRadius = 7.5
-        // Badge nằm HẲN trong ô: tràn ra ngoài thì bị rail cắt mất ở mép phải.
-        // Đặt ở GÓC tile, hơi tràn ra ngoài như badge iOS — rail rộng 64, tile 48 nên
-        // còn 8px lề mỗi bên, tràn 4px vẫn không bị cắt.
-        let w = max(15, badge.intrinsicContentSize.width + 7)
-        badge.frame = NSRect(x: b.frame.maxX - w + 4, y: b.frame.maxY - 11, width: w, height: 15)
-        container.addSubview(badge)
+    let height = 12 + CGFloat(services.count) * Rail.tile
+        + CGFloat(max(0, services.count - 1)) * Rail.gap + 12
+    let container = NSView(frame: NSRect(x: 0, y: 0, width: Rail.width, height: height))
+    container.appearance = appearance
+    container.wantsLayer = true
+
+    let stack: NSView = build.view
+    stack.translatesAutoresizingMaskIntoConstraints = false
+    container.addSubview(stack)
+    NSLayoutConstraint.activate([
+        stack.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+        stack.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+        stack.topAnchor.constraint(equalTo: container.topAnchor),
+        // KHÔNG pin bottom — pin cả hai là stack bị giãn và mất spacing.
+    ])
+    container.layoutSubtreeIfNeeded()
+
+    // In frame thật: đoán layout đã sai 2 lần, phải đo.
+    FileHandle.standardError.write(Data("appearance=\(appearance.name.rawValue) container=\(container.frame.size)\n".utf8))
+    FileHandle.standardError.write(Data("  stack frame=\(stack.frame)\n".utf8))
+    for (i, b) in build.buttons.enumerated() {
+        FileHandle.standardError.write(Data("  tile[\(i)] frame=\(b.frame) layer=\(b.layer?.bounds ?? .zero) fitting=\(b.fittingSize) alignRect=\(b.alignmentRectInsets)\n".utf8))
+        FileHandle.standardError.write(Data("      intrinsic=\(b.intrinsicContentSize)\n".utf8))
     }
+
+    let rep = container.bitmapImageRepForCachingDisplay(in: container.bounds)!
+    // Màu semantic (windowBackgroundColor, labelColor) và tile phải resolve BÊN TRONG
+    // block này. Set `.cgColor` bên ngoài là nó chốt theo appearance hiện tại của
+    // process — bản "dark" render ra y hệt bản light, so sánh thành vô nghĩa.
+    appearance.performAsCurrentDrawingAppearance {
+        container.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        Rail.style(build, services: services, activeIndex: activeIndex)
+        container.cacheDisplay(in: container.bounds, to: rep)
+    }
+    return rep
 }
 
-guard let rep = container.bitmapImageRepForCachingDisplay(in: container.bounds) else {
-    FileHandle.standardError.write(Data("không tạo được bitmap\n".utf8)); exit(1)
-}
-container.cacheDisplay(in: container.bounds, to: rep)
-guard let png = rep.representation(using: .png, properties: [:]) else {
+let light = renderRail(appearance: NSAppearance(named: .aqua)!)
+let dark = renderRail(appearance: NSAppearance(named: .darkAqua)!)
+
+// Ghép ngang: light | dark, cách nhau 12px để phân biệt.
+let pad: CGFloat = 12
+let w = CGFloat(light.pixelsWide) + pad + CGFloat(dark.pixelsWide)
+let h = max(CGFloat(light.pixelsHigh), CGFloat(dark.pixelsHigh))
+let combined = NSImage(size: NSSize(width: w, height: h))
+combined.lockFocus()
+NSColor.systemGray.setFill()
+NSRect(x: 0, y: 0, width: w, height: h).fill()
+light.draw(in: NSRect(x: 0, y: 0, width: CGFloat(light.pixelsWide), height: CGFloat(light.pixelsHigh)))
+dark.draw(in: NSRect(x: CGFloat(light.pixelsWide) + pad, y: 0,
+                     width: CGFloat(dark.pixelsWide), height: CGFloat(dark.pixelsHigh)))
+combined.unlockFocus()
+
+guard let tiff = combined.tiffRepresentation,
+      let rep = NSBitmapImageRep(data: tiff),
+      let png = rep.representation(using: .png, properties: [:]) else {
     FileHandle.standardError.write(Data("không encode được PNG\n".utf8)); exit(1)
 }
 try png.write(to: URL(fileURLWithPath: outPath))
-print("đã ghi \(outPath) (\(Int(container.bounds.width))x\(Int(container.bounds.height)))")
+print("đã ghi \(outPath) — trái = light, phải = dark (\(Int(w))x\(Int(h)))")

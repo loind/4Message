@@ -549,7 +549,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
     private var webHost: NSView?
     private var railButtons: [NSButton] = []
     private var railBadges: [NSTextField] = []
-    private var railView: NSStackView?
+    private var railView: NSView?
     private var railWidthConstraint: NSLayoutConstraint?
     private var railMenuItem: NSMenuItem?
 
@@ -657,79 +657,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         activeIndex = 0
     }
 
-    /// Rail dọc bên trái + vùng chứa webview. Auto Layout để resize cửa sổ vẫn đúng.
+    /// Rail dọc bên trái + vùng chứa webview.
+    ///
+    /// Dựng qua `Rail.make` — cùng hàm mà `tools/preview-rail.swift` dùng. Trước đây app
+    /// và preview có code riêng, nên preview không thể phát hiện lỗi layout của app.
     private func buildRailContainer() -> NSView {
         let container = NSView()
         let host = NSView()
         webHost = host
 
-        let rail = NSStackView()
+        let build = Rail.make(services: services, target: self, action: #selector(railClicked(_:)))
+        railButtons = build.buttons
+        railBadges = build.badges
+        let rail = build.view
         railView = rail
-        rail.orientation = .vertical
-        rail.alignment = .centerX
-        rail.spacing = 6
-        rail.edgeInsets = NSEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
-
-        railButtons = services.enumerated().map { i, service in
-            let b = NSButton(frame: .zero)
-            b.tag = i
-            b.target = self
-            b.action = #selector(railClicked(_:))
-            b.title = ""
-            b.isBordered = false
-            b.imagePosition = .imageOnly
-            // Không set pointSize thì SF Symbol render ở cỡ mặc định, nhỏ hẳn so với ô.
-            b.image = NSImage(systemSymbolName: service.symbol, accessibilityDescription: service.title)?
-                .withSymbolConfiguration(.init(pointSize: 22, weight: .semibold))
-            b.image?.isTemplate = true
-            b.toolTip = service.title
-            // Đặt label thẳng trên nút, KHÔNG dựa vào accessibilityDescription của image:
-            // `.withSymbolConfiguration(...)` trả về image mới và làm mất description đó,
-            // nên nút icon-only thành không có label cho screen reader.
-            b.setAccessibilityLabel(service.title)
-            b.wantsLayer = true
-            b.layer?.cornerRadius = 12
-            b.translatesAutoresizingMaskIntoConstraints = false
-            b.widthAnchor.constraint(equalToConstant: 48).isActive = true
-            b.heightAnchor.constraint(equalToConstant: 48).isActive = true
-
-            // Badge unread: icon-only nên phải có chỗ hiện số, không thì mất luôn lý do
-            // chính để có rail (thấy kênh khác có tin mới mà không phải bấm qua).
-            let badge = NSTextField(labelWithString: "")
-            badge.font = .systemFont(ofSize: 9.5, weight: .bold)
-            badge.textColor = .white
-            badge.alignment = .center
-            badge.wantsLayer = true
-            badge.layer?.backgroundColor = NSColor.systemRed.cgColor
-            badge.layer?.cornerRadius = 7.5
-            badge.isHidden = true
-            badge.translatesAutoresizingMaskIntoConstraints = false
-            b.addSubview(badge)
-            // Ở GÓC tile, tràn 4px như badge iOS. Rail 64 / tile 48 nên còn 8px lề mỗi
-            // bên — tràn 4px vẫn không bị rail cắt (bản đầu tràn nhiều hơn nên bị cắt).
-            NSLayoutConstraint.activate([
-                badge.trailingAnchor.constraint(equalTo: b.trailingAnchor, constant: 4),
-                badge.topAnchor.constraint(equalTo: b.topAnchor, constant: -4),
-                badge.heightAnchor.constraint(equalToConstant: 15),
-                badge.widthAnchor.constraint(greaterThanOrEqualToConstant: 15),
-            ])
-            railBadges.append(badge)
-
-            rail.addView(b, in: .top)
-            return b
-        }
 
         for v in [rail, host] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             container.addSubview(v)
         }
-        let railWidth = rail.widthAnchor.constraint(equalToConstant: 64)
+        let railWidth = rail.widthAnchor.constraint(equalToConstant: Rail.width)
         railWidthConstraint = railWidth
 
         NSLayoutConstraint.activate([
             rail.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             rail.topAnchor.constraint(equalTo: container.topAnchor),
-            rail.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             railWidth,
             host.leadingAnchor.constraint(equalTo: rail.trailingAnchor),
             host.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -750,7 +702,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
     private func applyRailCollapsed(animated: Bool) {
         let collapsed = railCollapsed
-        railWidthConstraint?.constant = collapsed ? 0 : 64
+        railWidthConstraint?.constant = collapsed ? 0 : Rail.width
         railView?.isHidden = collapsed
         railMenuItem?.title = collapsed ? "Hiện cột kênh" : "Ẩn cột kênh"
 
@@ -778,19 +730,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
         ])
     }
 
-    /// Tile mang màu thương hiệu, glyph TRẮNG. Bản đầu dùng glyph màu trên tile xám —
-    /// tile inactive lại nổi hơn active, tức ngược logic; và glyph xám nhạt trên xám
-    /// sáng thì gần như không đọc được. Thiết kế này xem trước bằng
-    /// `swift tools/preview-rail.swift out.png` (không cần quyền Screen Recording).
+    /// Xem trước thiết kế mà không cần chạy app: `./preview-rail.sh out.png`
+    /// (render cả light và dark, dùng đúng `Rail.make`/`Rail.style` này).
     private func refreshRail() {
-        for (i, b) in railButtons.enumerated() {
-            let active = i == activeIndex
-            b.layer?.backgroundColor = services[i].tint
-                .withAlphaComponent(active ? 1.0 : 0.45).cgColor
-            b.contentTintColor = NSColor.white.withAlphaComponent(active ? 1.0 : 0.8)
-            b.layer?.borderWidth = active ? 2 : 0
-            b.layer?.borderColor = NSColor.white.withAlphaComponent(0.85).cgColor
-        }
+        guard !railButtons.isEmpty else { return }
+        Rail.style(RailBuild(view: railView ?? NSView(), buttons: railButtons, badges: railBadges),
+                   services: services, activeIndex: activeIndex)
     }
 
     private func makeWindow(title: String, autosave: String) -> NSWindow {

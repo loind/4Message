@@ -82,12 +82,24 @@ lần chạy sau. Thu gọn rồi vẫn đổi kênh được bằng ⌘1/⌘2/�
 Thiết kế rail xem trước không cần chạy app:
 
 ```bash
-swift tools/preview-rail.swift out.png
+./preview-rail.sh out.png     # trái = light, phải = dark
 ```
 
-Nó render đúng control AppKit thật ra PNG offscreen — cần vì `screencapture` đòi quyền
-Screen Recording. Lưu ý: đó là bản **dựng lại theo spec**, không phải ảnh chụp app đang
-chạy, nên có thể lệch nếu sửa `main.swift` mà không sửa nó.
+Nó compile kèm `Sources/Messenger/RailView.swift` và gọi **đúng** `Rail.make`/`Rail.style`
+mà app dùng, nên không thể lệch. Cần công cụ này vì `screencapture` đòi quyền Screen
+Recording.
+
+Hai lỗi mà bản preview đầu tiên **không thể** phát hiện, vì nó tự dựng lại UI bằng frame
+thủ công thay vì gọi code của app:
+
+- **Tile dính liền nhau.** `NSButton` có `alignmentRectInsets` khác 0 (đo được top 6 /
+  bottom 4, đổi theo symbol). Auto Layout ràng buộc **alignment rect** chứ không phải
+  frame, nên `height = 48` cho ra frame 58; còn layer — thứ được vẽ — dùng frame. `gap = 10`
+  bị insets ăn còn 1px. Sửa bằng `RailButton` override `alignmentRectInsets` về 0.
+- **Chỉ kiểm tra ở dark mode.** Preview đặt `.cgColor` từ màu semantic *bên ngoài* block
+  appearance, nên bản "dark" render y hệt bản light. Màu phải resolve **trong**
+  `performAsCurrentDrawingAppearance`. Tile cũng chuyển sang màu **đục** — alpha phủ nền
+  không biết trước làm light mode nhạt toẹt và tile inactive nổi hơn active.
 
 **Threads là FEED, không phải chat.** `threads.com/direct` và `/direct/inbox` đều redirect
 về feed → web Threads không có surface DM (đã kiểm chứng). Giữ trong danh sách vì có thể
