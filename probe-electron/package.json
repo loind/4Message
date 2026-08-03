@@ -1,0 +1,13 @@
+{
+  "name": "fbmess-electron-probe",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shell Electron toi gian de do CPU layout cua Blink tren cung trang Messenger",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^43.2.0"
+  }
+}

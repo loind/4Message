@@ -9,3 +9,4 @@ diag.log
 build-icon/
 *.bc
 memory-track.csv
+probe-electron/node_modules/

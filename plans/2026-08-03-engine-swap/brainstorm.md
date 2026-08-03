@@ -51,9 +51,9 @@ Trước đó tôi đã đẩy lại ý "đổi engine" hai lần dựa trên ha
 | Đổi engine thật | Không | **Có** | **Có** | Không (vẫn WebKit) |
 | Chữa layout thrash | Không chắc | Có nếu Blink layout tốt hơn | Như B | **Không** — cùng engine |
 | Công sức | ~20 dòng CSS | 0 dòng | **Viết lại toàn bộ app** | 0 dòng |
-| RAM thêm | 0 | Chrome tự chạy | **+150–250 MB bundle** | 0 |
+| RAM thêm | 0 | Chrome tự chạy | **+70 MB (đo thật, không phải 250)** | 0 |
 | Giữ menu bar resident, ⌘⇧M, badge, rail | Có | **Mất hết** | Phải làm lại | Mất |
-| Notification | Shim hiện tại | Của Chrome | Phải làm lại | **Web Push thật** |
+| Notification | Shim hiện tại | Của Chrome | **API native, tốt hơn shim** | **Web Push thật** |
 | Bảo trì | Thấp | Không có | **Tự lo update Chromium** | Không có |
 
 **Tauri không phải lựa chọn:** trên macOS Tauri dùng chính `WKWebView`. Đổi mà không đổi
@@ -93,9 +93,42 @@ Máy này đang chạy sẵn hai app Electron: **Orca renderer 207 MB**, **Bitwa
 chưa tính main + GPU + network process của mỗi app. Đó là chi phí RAM thực tế của Electron
 trên chính máy user, không phải con số tôi suy ra.
 
+## KẾT QUẢ ĐO: Blink không burst — bằng chứng ủng hộ đổi engine
+
+Đã dựng `probe-electron/` (Electron 43, UA đã bỏ token `Electron/`, inject đúng 5 rule ẩn
+chrome như app) và đo cùng phương pháp delta-cputime, cùng máy, cùng account, cùng trang.
+
+| Chỉ tiêu | WKWebView | Blink (Electron) |
+| --- | --- | --- |
+| Sàn khi idle | 3–5% | **0.2–0.7%** (sau ~5 phút) |
+| Peak quan sát được | **60–100%** | **11.6%** |
+| Cửa sổ quan sát | burst xuất hiện trong ~40s; TB cả đời 4h = 9.2% | 11 phút, **không burst** |
+| Tổng footprint | ~730 MB (4 process) | **799 MB** (6 process) |
+
+**Kết luận:** WebKit và Blink tốn CPU trung bình tương đương (9.2% vs 8–11%), nhưng
+**phân bố khác hẳn**. WKWebView nền thấp rồi bùng 60–100%; Blink đều rồi tụt về gần 0.
+Với triệu chứng "không bấm được", **phân bố mới là thứ quyết định** — 10% đều không bao giờ
+treo, một burst 60–100% thì treo.
+
+### Hai lập luận của tôi bị số liệu làm yếu
+
+1. **"C là quay về Franz, +150–250 MB"** — con số đó là **bundle trên đĩa**, không phải RAM
+   lúc chạy. Đo thật: **799 vs ~730 MB**, chênh ~70 MB. Chi phí áp đảo là trang Facebook,
+   không phải engine bundle.
+2. **"Electron ăn RAM hơn trên máy 16 GB"** — vẫn đúng về dấu, nhưng độ lớn nhỏ hơn nhiều so
+   với cách tôi trình bày.
+
+### Còn chưa xác minh
+
+- Đo trên **Mac mini 24 GB**, còn lỗi ở **M1 16 GB**. Phải lặp lại ở đó.
+- n=1 mỗi engine.
+- Cửa sổ Electron **để idle** trong lúc soak. Burst của WKWebView có thể tương quan với
+  tương tác — cần đo lúc dùng thật để loại biến này.
+
 ## Đề xuất
 
-**Chưa viết code. Đo xem Chromium có thật sự tốt hơn trước đã.**
+Dữ liệu đã đủ để **không còn cản hướng đổi engine**. Nhưng vẫn nên lặp lại phép đo trên
+MacBook trước khi port tính năng.
 
 Lý do: toàn bộ luận điểm "Chromium mượt hơn với Facebook" hiện dựa trên suy lý (Meta phát
 triển chính trên Chrome), **không có số nào từ máy này**. Mà A, B, C khác nhau hàng chục
