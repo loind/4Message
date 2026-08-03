@@ -188,6 +188,8 @@ phải thử lại; số liệu ở `docs/perf-process.md`.
 | `./make-icon.sh` | Sinh `Resources/AppIcon.icns` từ `tools/make-icon.swift` |
 | `./preview-rail.sh` | Render rail ra PNG (light + dark) để xem thiết kế |
 | `./docs-check.sh` | Kiểm tra docs không lệch code: env var và script đều phải được nhắc |
+| `./freeze-sample.sh` | Chụp stack trace của WebContent **đúng lúc** nội dung đóng băng |
+| `./chrome-probe.sh` | Đo CPU của Chrome trên cùng trang, để so với WKWebView |
 
 ## Đo hiệu năng — so với Franz
 
