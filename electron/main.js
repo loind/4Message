@@ -422,8 +422,18 @@ function buildMenu () {
 
 app.whenReady().then(() => {
   // Web Notification của trang — Electron hiện native, không cần shim như WKWebView.
-  session.fromPartition('persist:fbmess').setPermissionRequestHandler((_wc, permission, cb) => {
-    cb(permission === 'notifications' || permission === 'media')
+  //
+  // Gate theo ORIGIN, không chỉ theo loại quyền: partition này chỉ nên có content của Meta
+  // và Zalo, nhưng một redirect hay iframe đưa host lạ vào đó thì nó cũng xin được
+  // camera/mic. Fail-closed — origin không đọc được thì từ chối.
+  session.fromPartition('persist:fbmess').setPermissionRequestHandler((_wc, permission, cb, details) => {
+    const wanted = permission === 'notifications' || permission === 'media'
+    const origin = (details && (details.requestingUrl || details.securityOrigin)) || ''
+    const ok = wanted && isInternal(origin)
+    // Log khi từ chối: nếu Electron đổi tên field details, notification sẽ chết im lặng —
+    // mà đó là tính năng cốt lõi của app. Có dòng log này thì còn tra được.
+    if (wanted && !ok) console.warn(`quyền BỊ TỪ CHỐI: ${permission} từ ${origin || '(không rõ origin)'}`)
+    cb(ok)
   })
 
   // Rail gửi vị trí tile; đổi ngay sang id vì index chỉ đúng tại thời điểm render.

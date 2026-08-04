@@ -2,10 +2,6 @@
 *.app/
 .DS_Store
 .swiftpm/
-bench-*.log
-bench-run.log
-startup-*.log
-diag.log
 build-icon/
 *.bc
 memory-track.csv
@@ -14,3 +10,5 @@ electron/node_modules/
 electron/build-info.json
 build-electron/
 FBMessElectron-*.tar.xz
+*.log
+/.json
