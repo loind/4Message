@@ -20,6 +20,28 @@ const RAIL_WIDTH = 68
 const services = resolveServices(process.env.FBMESS_SERVICES)
 const keepChrome = process.env.FBMESS_KEEP_FB_CHROME === '1'
 const probe = process.argv.includes('--probe')
+const probeToggle = process.argv.includes('--probe-toggle')
+// Probe không được đụng userData thật: persist() ghi prefs.json, chạy test mà thiếu dòng
+// này từng âm thầm ghi đè lựa chọn kênh thật của user. Cùng thư mục cố định cho mọi probe
+// flag — --probe-prefs (Task 6) phải đọc lại đúng cái --probe-toggle vừa ghi.
+if (probe || probeToggle || process.argv.includes('--probe-prefs')) {
+  const probeDir = path.join(app.getPath('temp'), 'fbmess-probe')
+  app.setPath('userData', probeDir)
+  // --probe-toggle giả định xuất phát từ ĐỦ cả vũ trụ hiện tại (assert "đủ kênh để test" bên
+  // dưới) — prefs.json rớt lại từ lần probe trước sẽ thu hẹp vũ trụ đó, làm lần chạy sau fail
+  // oan chứ không phải vì bug thật. Chỉ reset phần TRONG vũ trụ hiện tại, giữ nguyên id
+  // NGOÀI vũ trụ (cùng logic merge của persist()) — không thì test merge ở Finding 3 tự phá
+  // chính dữ liệu nó cần kiểm tra.
+  if (probeToggle) {
+    // Máy sạch chưa từng chạy probe thì probeDir chưa tồn tại — savePrefs ghi file tạm bên
+    // trong đó nên cần thư mục có sẵn trước, không thì ENOENT văng ra TRƯỚC cả runProbe (ở
+    // đây còn chưa kịp định nghĩa), Electron treo với dialog "App threw an error during load"
+    // trong môi trường headless không ai bấm tắt được.
+    fs.mkdirSync(probeDir, { recursive: true })
+    const outside = (loadPrefs(probeDir).enabled || []).filter(id => !services.some(s => s.id === id))
+    savePrefs(probeDir, { enabled: outside, railCollapsed: false })
+  }
+}
 const probeOpened = []
 
 let probeFailed = 0
@@ -76,7 +98,11 @@ let railCollapsed = false
 function enabledIds () { return runtimes.map(r => r.service.id) }
 
 function persist () {
-  savePrefs(app.getPath('userData'), { enabled: enabledIds(), railCollapsed })
+  const dir = app.getPath('userData')
+  // Giữ id nằm NGOÀI universe hiện tại: chạy với FBMESS_SERVICES thu hẹp không được
+  // biến "universe bị thu hẹp để debug" thành "user đã tắt mấy kênh kia" vĩnh viễn.
+  const outside = (loadPrefs(dir).enabled || []).filter(id => !services.some(s => s.id === id))
+  savePrefs(dir, { enabled: [...enabledIds(), ...outside], railCollapsed })
 }
 
 /** Vị trí canonical: đếm số kênh đang bật đứng trước `id` trong `services`. */
@@ -398,6 +424,11 @@ app.whenReady().then(() => {
   if (process.argv.includes('--probe-toggle')) runProbe(20000, async () => {
     const pids = new Map(runtimes.map(r => [r.service.id, r.view.webContents.getOSProcessId()]))
     console.log(`bật ${runtimes.length} kênh: ${[...pids.entries()].map(([k, v]) => k + '=' + v).join(' ')}`)
+
+    // Precondition: nếu prefs.json (kể cả của chính probe trước đó) để lại ít hơn đủ kênh,
+    // vòng lặp tắt bên dưới không tắt gì và assert liveness PASS rỗng-so-rỗng một cách vô
+    // nghĩa — đúng lúc nó phải chứng minh process thật sự chết.
+    check('đủ kênh để test', pids.size, services.length)
 
     const keep = runtimes[0].service.id
     for (const id of [...pids.keys()].filter(x => x !== keep)) setEnabled(id, false)
