@@ -355,7 +355,7 @@ function buildTray () {
       })),
       { type: 'separator' },
       { label: 'Kênh', submenu: serviceToggleItems() },
-      { label: railCollapsed ? 'Hiện cột kênh' : 'Ẩn cột kênh', click: toggleRail },
+      { label: railCollapsed ? 'Hiện cột kênh' : 'Ẩn cột kênh', enabled: runtimes.length > 1, click: toggleRail },
       { type: 'separator' },
       { label: 'Hiện/ẩn cửa sổ', accelerator: 'Cmd+Shift+M', click: toggleWindow },
       { label: 'Tải lại', click: () => active().view.webContents.reload() },
@@ -536,6 +536,15 @@ app.whenReady().then(() => {
       kenh.submenu.items.filter(i => i.type === 'checkbox' && i.checked).map(i => i.label).sort(),
       runtimes.map(r => r.service.title).sort())
     check('nhãn ẩn/hiện cột', kenh.submenu.items[services.length + 1].label, 'Ẩn cột kênh')
+
+    // Mục ẩn/hiện cột kênh trên TRAY dùng chung guard `enabled: runtimes.length > 1` với item
+    // này ở app-menu (fix round 1 — tray thiếu guard, đã thêm vào buildTray()). Không đọc lại
+    // được item thật trên tray để assert trực tiếp: Electron Tray không có getContextMenu()
+    // (xác nhận qua electron.d.ts và probe thủ công tạo Tray + setContextMenu rồi liệt kê
+    // prototype — không có getter nào). Đọc lại item app-menu (đọc được thật) làm bằng chứng
+    // guard đúng — chạy thêm với FBMESS_SERVICES=messenger để thấy nhánh false.
+    check('app-menu ẩn/hiện cột: enabled khớp runtimes.length > 1',
+      kenh.submenu.items[services.length + 1].enabled, runtimes.length > 1)
 
     persist()
   })
