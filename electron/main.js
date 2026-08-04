@@ -171,7 +171,12 @@ function serviceToggleItems () {
       // Tắt kênh cuối cùng để lại cửa sổ rỗng — disable thay vì im lặng bỏ qua, để
       // người dùng thấy được vì sao không bấm được.
       enabled: !(on && only),
-      click: () => setEnabled(s.id, !on),
+      // KHÔNG dùng `on` đã đóng closure ở đây: tray rebuild mỗi 5s (setInterval bên dưới),
+      // nên bấm app-menu đổi trạng thái rồi bấm tray trong vòng 5s đó thấy `on` cũ — click
+      // gọi setEnabled(id, !cũ) tức là bật lại đúng cái đã tắt, item coi như không phản ứng.
+      // `checked`/`enabled` phía trên vẫn dùng giá trị lúc dựng menu — chỉ quyết định lúc
+      // click mới cần đọc sống.
+      click: () => setEnabled(s.id, !runtimes.some(r => r.service.id === s.id)),
     }
   })
 }
