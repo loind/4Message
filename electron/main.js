@@ -150,6 +150,28 @@ function setEnabled (id, on) {
   updateBadge()
 }
 
+function toggleRail () {
+  railCollapsed = !railCollapsed
+  persist()
+  layout()
+  buildMenu()
+}
+
+/** Item bật/tắt kênh, dùng chung cho app menu và tray menu. */
+function serviceToggleItems () {
+  const only = runtimes.length <= 1
+  return services.map(s => {
+    const on = runtimes.some(r => r.service.id === s.id)
+    return {
+      label: s.title, type: 'checkbox', checked: on,
+      // Tắt kênh cuối cùng để lại cửa sổ rỗng — disable thay vì im lặng bỏ qua, để
+      // người dùng thấy được vì sao không bấm được.
+      enabled: !(on && only),
+      click: () => setEnabled(s.id, !on),
+    }
+  })
+}
+
 function buildInfo () {
   try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')) }
   catch { return { commit: 'unknown', built: 'unknown' } }
@@ -332,6 +354,9 @@ function buildTray () {
         click: () => { selectId(r.service.id); win.show() },
       })),
       { type: 'separator' },
+      { label: 'Kênh', submenu: serviceToggleItems() },
+      { label: railCollapsed ? 'Hiện cột kênh' : 'Ẩn cột kênh', click: toggleRail },
+      { type: 'separator' },
       { label: 'Hiện/ẩn cửa sổ', accelerator: 'Cmd+Shift+M', click: toggleWindow },
       { label: 'Tải lại', click: () => active().view.webContents.reload() },
       { type: 'separator' },
@@ -359,6 +384,19 @@ function buildMenu () {
         { type: 'separator' },
         { label: 'Ẩn cửa sổ', accelerator: 'Cmd+W', click: () => win.hide() },
         { label: 'Thoát', accelerator: 'Cmd+Q', click: () => { app.isQuitting = true; app.quit() } },
+      ],
+    },
+    {
+      label: 'Kênh',
+      submenu: [
+        ...serviceToggleItems(),
+        { type: 'separator' },
+        {
+          label: railCollapsed ? 'Hiện cột kênh' : 'Ẩn cột kênh',
+          accelerator: 'Cmd+0',
+          enabled: runtimes.length > 1,
+          click: toggleRail,
+        },
       ],
     },
     { label: 'Sửa', submenu: [
@@ -480,6 +518,24 @@ app.whenReady().then(() => {
       // full coverage.
       console.log(`bỏ qua check thứ tự canonical: universe chỉ ${services.length} kênh, cần >= 4`)
     }
+
+    // ⌘0 phải độc lập với quy tắc "còn 1 kênh": 3 kênh bật mà ẩn tay thì rail vẫn phải ẩn.
+    // Đó là toàn bộ lý do có hai trạng thái tách rời.
+    toggleRail()
+    check('ẩn tay: railCollapsed', railCollapsed, true)
+    check('ẩn tay: rail hiện', railVisible(runtimes.length, railCollapsed), false)
+    toggleRail()
+    check('hiện lại: railCollapsed', railCollapsed, false)
+    check('hiện lại: rail hiện', railVisible(runtimes.length, railCollapsed), true)
+
+    const kenh = Menu.getApplicationMenu().items.find(i => i.label === 'Kênh')
+    check('có menu Kênh', !!kenh, true)
+    // 4 kênh + separator + ẩn/hiện cột
+    check('số item menu Kênh', kenh.submenu.items.length, services.length + 2)
+    check('kênh đang tick',
+      kenh.submenu.items.filter(i => i.type === 'checkbox' && i.checked).map(i => i.label).sort(),
+      runtimes.map(r => r.service.title).sort())
+    check('nhãn ẩn/hiện cột', kenh.submenu.items[services.length + 1].label, 'Ẩn cột kênh')
 
     persist()
   })
