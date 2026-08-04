@@ -486,13 +486,38 @@ app.whenReady().then(() => {
     // nghĩa — đúng lúc nó phải chứng minh process thật sự chết.
     check('đủ kênh để test', pids.size, services.length)
 
+    // --- Kịch bản nguy hiểm nhất của setEnabled: tắt ĐÚNG kênh đang xem ---
+    // activeId lúc khởi động luôn là runtimes[0].service.id (gán trong createWindow). Vòng
+    // lặp "tắt tất cả trừ keep" bên dưới cố tình không đụng runtimes[0], nên nếu thiếu đoạn
+    // này thì nhánh `if (rt.service.id === activeId)` trong setEnabled — đổi activeId sang
+    // láng giềng TRƯỚC khi removeChildView/close() view — không bao giờ chạy trong cả bộ
+    // test. Đây đúng là lỗ hổng bản trước của probe này mắc phải: `keep` và `activeId` khi
+    // đó cùng là runtimes[0], nên so `keep === keep` không thể fail dù thứ tự có bị đảo.
+    const activeAtStart = activeId
+    const activeAtStartPid = pids.get(activeAtStart)
+    const survivorExpected = runtimes[1].service.id
+    setEnabled(activeAtStart, false)
+
+    check('kênh đang xem biến mất khỏi runtimes sau khi tắt', runtimes.some(r => r.service.id === activeAtStart), false)
+    check('activeId chuyển sang láng giềng còn sống', activeId, survivorExpected)
+    // Nếu setEnabled lỡ destroy view TRƯỚC khi reassign activeId, active() ở đây sẽ trỏ vào
+    // webContents vừa .close() (hoặc vào runtime đã bị splice mất) — isDestroyed() bắt được
+    // ngay tại chỗ, không cần đợi 3s để process OS chết mới biết.
+    check('active() còn dùng được ngay sau khi tắt kênh đang xem', active().view.webContents.isDestroyed(), false)
+
+    // Trả về đúng trạng thái ban đầu — phần còn lại của bộ test bên dưới giả định runtimes[0]
+    // là kênh sống sót cuối cùng, nên không phải viết lại các assert đã có.
+    setEnabled(activeAtStart, true)
+    selectId(activeAtStart)
+    check('activeId quay lại kênh gốc sau khi bật lại', activeId, activeAtStart)
+
     const keep = runtimes[0].service.id
     for (const id of [...pids.keys()].filter(x => x !== keep)) setEnabled(id, false)
     // Process chết không đồng bộ với close() — chờ rồi mới kiểm liveness.
     await new Promise(r => setTimeout(r, 3000))
 
     check('còn bật', runtimes.length, 1)
-    check('activeId sau khi tắt kênh đang xem', activeId, keep)
+    check('activeId không đổi vì kênh bị tắt trong vòng lặp trên không phải kênh đang xem', activeId, keep)
 
     // Điều kiện MẠNH NHẤT của thiết kế: process renderer của kênh tắt phải CHẾT.
     // Process chết là RAM đã trả về OS — khác với đo footprint, nơi bmalloc trả page chậm
@@ -500,6 +525,9 @@ app.whenReady().then(() => {
     const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
     const leaked = [...pids.entries()].filter(([id, pid]) => id !== keep && alive(pid)).map(([id]) => id)
     check('process kênh đã tắt còn sống', leaked, [])
+    // Process GỐC của kênh vừa tắt-lúc-đang-xem-rồi-bật-lại ở trên: bật lại tạo process MỚI,
+    // process CŨ phải bị OS thu hồi y như mọi kênh tắt khác, không phải vì nó là activeId.
+    check('process gốc của kênh vừa tắt lúc đang xem còn sống', alive(activeAtStartPid), false)
 
     check('rail hiện khi còn 1 kênh', railVisible(runtimes.length, railCollapsed), false)
 
