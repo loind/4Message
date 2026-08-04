@@ -1,4 +1,4 @@
-// FB Mess (Electron) — cùng UX với bản Swift: rail chọn kênh, ẩn chrome, link ngoài
+// 4Messenge — cùng UX với bản Swift: rail chọn kênh, ẩn chrome, link ngoài
 // surface mở browser, tray resident, global hotkey, badge unread.
 //
 // Vì sao có bản này: WKWebView bùng 60–100% CPU theo đợt khiến nội dung đóng băng, trong
@@ -191,7 +191,7 @@ function buildInfo () {
 
 if (process.argv.includes('--version')) {
   const b = buildInfo()
-  console.log(`FB Mess (Electron) ${app.getVersion()} · build ${b.build ?? '?'}`)
+  console.log(`${app.getName()} ${app.getVersion()} · build ${b.build ?? '?'}`)
   console.log(`commit   ${b.commit}${b.dirty ? ' (DIRTY)' : ''}`)
   console.log(`built    ${b.built}`)
   console.log(`electron ${process.versions.electron} · chromium ${process.versions.chrome}`)
@@ -313,7 +313,7 @@ function selectId (id) {
 function createWindow () {
   win = new BrowserWindow({
     width: 1100, height: 760, minWidth: 420, minHeight: 400,
-    title: 'FB Mess', show: false,
+    title: app.getName(), show: false,
   })
 
   const prefs = loadPrefs(app.getPath('userData'))

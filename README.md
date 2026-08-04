@@ -41,7 +41,7 @@ Có bản thứ hai dùng engine Blink, vì WKWebView bùng 60–100% CPU theo �
 đóng băng (Blink đo 0.58% trung bình qua 14 giờ trên cùng trang).
 
 ```bash
-./build-electron.sh     # → FBMessElectron.app + FBMessElectron-arm64.zip
+./build-electron.sh     # → 4Messenge.app + 4Messenge-arm64.zip
 ```
 
 Hai bản chạy song song được, session tách riêng. Hướng dẫn đầy đủ: `electron/README.md`.

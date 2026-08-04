@@ -28,8 +28,8 @@ Không cần Xcode. Chỉ khi `Resources/AppIcon.icns` bị mất thì `build-el
 
 Ra hai thứ ở gốc repo:
 
-- `FBMessElectron.app` (230 MB) — chạy được ngay trên máy build
-- `FBMessElectron-arm64.tar.xz` (70 MB) — để copy sang máy khác
+- `4Messenge.app` (230 MB) — chạy được ngay trên máy build
+- `4Messenge-arm64.tar.xz` (70 MB) — để copy sang máy khác
 
 ```bash
 ./build-electron.sh --run                    # build xong mở luôn
@@ -122,8 +122,8 @@ Bốn cách, không cái nào cần nhìn màn hình:
 
 ```bash
 node electron/selftest.js                                     # logic surface/unread thuần
-./FBMessElectron.app/Contents/MacOS/FBMessElectron --version   # commit + electron + chromium
-./FBMessElectron.app/Contents/MacOS/FBMessElectron --probe     # wiring thật, cần mạng
+./4Messenge.app/Contents/MacOS/4Messenge --version   # commit + electron + chromium
+./4Messenge.app/Contents/MacOS/4Messenge --probe     # wiring thật, cần mạng
 cd electron && ./node_modules/.bin/electron preview-rail.js /tmp/rail   # rail ra PNG
 ```
 
@@ -168,7 +168,7 @@ desktop trống, không soi bằng mắt được.
 
 ## Session tách riêng với bản Swift
 
-Store ở `~/Library/Application Support/FBMessElectron/`, không phải `~/Library/WebKit/`.
+Store ở `~/Library/Application Support/4Messenge/`, không phải `~/Library/WebKit/`.
 Cookie KHÔNG chuyển sang được → phải login lại cả ba kênh. Mỗi lần login là một device
 E2EE mới, nên hội thoại mã hoá đầu-cuối sẽ không có lịch sử cũ ở app này.
 
@@ -186,15 +186,15 @@ Vì vậy ⌘0 tách rời: nó chỉ ẩn cột, cả 4 kênh vẫn sống và 
 Không cho tắt kênh cuối cùng — cửa sổ rỗng không có đường thoát bằng chuột. Menu item bị
 disable, không im lặng bỏ qua.
 
-Trạng thái ở `~/Library/Application Support/FBMessElectron/prefs.json`. File hỏng hoặc thiếu
+Trạng thái ở `~/Library/Application Support/4Messenge/prefs.json`. File hỏng hoặc thiếu
 → về mặc định (bật tất cả), không crash. `FBMESS_SERVICES` vẫn là vũ trụ kênh khả dụng;
 prefs chỉ bật/tắt trong đó.
 
 Kiểm không cần nhìn màn hình:
 
 ```bash
-./FBMessElectron.app/Contents/MacOS/FBMessElectron --probe-toggle   # tắt 3 kênh, chứng minh process chết
-./FBMessElectron.app/Contents/MacOS/FBMessElectron --probe-prefs    # in trạng thái đã lưu
+./4Messenge.app/Contents/MacOS/4Messenge --probe-toggle   # tắt 3 kênh, chứng minh process chết
+./4Messenge.app/Contents/MacOS/4Messenge --probe-prefs    # in trạng thái đã lưu
 ```
 
 ## Khác biệt so với bản Swift

@@ -8,7 +8,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME=FBMessElectron
+APP_NAME=4Messenge
 REPO=loind/CustomMess
 
 command -v gh >/dev/null || { echo "cần gh CLI: brew install gh"; exit 1; }

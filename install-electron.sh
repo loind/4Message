@@ -4,7 +4,7 @@
 #   ./install-electron.sh
 set -euo pipefail
 
-APP_NAME=FBMessElectron
+APP_NAME=4Messenge
 APP=/Applications/$APP_NAME.app
 REPO=loind/CustomMess
 
