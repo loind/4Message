@@ -11,7 +11,10 @@ const {
 } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { isInternal, isSurface, resolveServices, unreadFromTitle } = require('./services')
+const {
+  isInternal, isSurface, resolveServices, unreadFromTitle, resolveEnabled, railVisible,
+} = require('./services')
+const { loadPrefs, savePrefs } = require('./prefs')
 
 const RAIL_WIDTH = 68
 const services = resolveServices(process.env.FBMESS_SERVICES)
@@ -67,6 +70,50 @@ function activeIdx () { return runtimes.findIndex(r => r.service.id === activeId
 /** @type {{service: any, view: WebContentsView, unread: string|null}[]} */
 const runtimes = []
 
+let prefs = { enabled: null, railCollapsed: false }
+let railCollapsed = false
+
+function enabledIds () { return runtimes.map(r => r.service.id) }
+
+function persist () {
+  savePrefs(app.getPath('userData'), { enabled: enabledIds(), railCollapsed })
+}
+
+/** Vị trí canonical: đếm số kênh đang bật đứng trước `id` trong `services`. */
+function canonicalSlot (id) {
+  const rank = (sid) => services.findIndex(s => s.id === sid)
+  return runtimes.filter(r => rank(r.service.id) < rank(id)).length
+}
+
+function setEnabled (id, on) {
+  const svc = services.find(s => s.id === id)
+  if (!svc || !win) return
+  const at = runtimes.findIndex(r => r.service.id === id)
+  if (on === (at >= 0)) return
+
+  if (on) {
+    runtimes.splice(canonicalSlot(id), 0, { service: svc, view: makeServiceView(svc), unread: null })
+  } else {
+    // Không cho tắt kênh cuối: cửa sổ rỗng không có đường thoát bằng chuột.
+    if (runtimes.length <= 1) return
+    const rt = runtimes[at]
+    // Đổi active TRƯỚC khi hủy view, không thì active trỏ vào webContents đã chết.
+    if (rt.service.id === activeId) {
+      activeId = (runtimes[at + 1] || runtimes[at - 1]).service.id
+    }
+    win.contentView.removeChildView(rt.view)
+    rt.view.webContents.close()
+    runtimes.splice(at, 1)
+  }
+
+  persist()
+  selectId(activeId)
+  buildMenu()
+  layout()
+  pushRailState()
+  updateBadge()
+}
+
 function buildInfo () {
   try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')) }
   catch { return { commit: 'unknown', built: 'unknown' } }
@@ -92,7 +139,7 @@ app.userAgentFallback = app.userAgentFallback
 function layout () {
   if (!win) return
   const { width, height } = win.getContentBounds()
-  const railW = services.length > 1 ? RAIL_WIDTH : 0
+  const railW = railVisible(runtimes.length, railCollapsed) ? RAIL_WIDTH : 0
   if (railView) railView.setBounds({ x: 0, y: 0, width: railW, height })
   const rt = active()
   if (rt) rt.view.setBounds({ x: railW, y: 0, width: Math.max(0, width - railW), height })
@@ -197,10 +244,15 @@ function createWindow () {
     title: 'FB Mess', show: false,
   })
 
-  for (const s of services) {
+  prefs = loadPrefs(app.getPath('userData'))
+  railCollapsed = prefs.railCollapsed
+  // Chỉ dựng view cho kênh đang bật — kênh tắt không tạo view rồi hủy.
+  for (const s of resolveEnabled(services, prefs)) {
     runtimes.push({ service: s, view: makeServiceView(s), unread: null })
   }
 
+  // Rail dựng khi vũ trụ có nhiều hơn 1 kênh, còn hiện hay không thì layout() quyết —
+  // vì số kênh bật đổi được lúc chạy, không thể quyết một lần lúc khởi động.
   if (services.length > 1) {
     railView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'rail-preload.js') } })
     railView.webContents.loadFile(path.join(__dirname, 'rail.html'))
@@ -341,6 +393,42 @@ app.whenReady().then(() => {
     console.log(`link ngoài  → openExternal: ${afterExternal > before ? 'CÓ (đúng)' : 'KHÔNG (SAI)'}`)
     console.log(`link surface → openExternal: ${afterSurface > afterExternal ? 'CÓ (SAI)' : 'KHÔNG (đúng)'}`)
 
+  })
+
+  if (process.argv.includes('--probe-toggle')) runProbe(20000, async () => {
+    const pids = new Map(runtimes.map(r => [r.service.id, r.view.webContents.getOSProcessId()]))
+    console.log(`bật ${runtimes.length} kênh: ${[...pids.entries()].map(([k, v]) => k + '=' + v).join(' ')}`)
+
+    const keep = runtimes[0].service.id
+    for (const id of [...pids.keys()].filter(x => x !== keep)) setEnabled(id, false)
+    // Process chết không đồng bộ với close() — chờ rồi mới kiểm liveness.
+    await new Promise(r => setTimeout(r, 3000))
+
+    check('còn bật', runtimes.length, 1)
+    check('activeId sau khi tắt kênh đang xem', activeId, keep)
+
+    // Điều kiện MẠNH NHẤT của thiết kế: process renderer của kênh tắt phải CHẾT.
+    // Process chết là RAM đã trả về OS — khác với đo footprint, nơi bmalloc trả page chậm
+    // và từng làm số liệu bản WKWebView vô nghĩa.
+    const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
+    const leaked = [...pids.entries()].filter(([id, pid]) => id !== keep && alive(pid)).map(([id]) => id)
+    check('process kênh đã tắt còn sống', leaked, [])
+
+    check('rail hiện khi còn 1 kênh', railVisible(runtimes.length, railCollapsed), false)
+
+    // Tắt kênh cuối cùng phải là no-op: cửa sổ rỗng không có đường thoát bằng chuột.
+    setEnabled(keep, false)
+    check('còn bật sau khi thử tắt kênh cuối', runtimes.length, 1)
+
+    // Bật lại phải vào đúng vị trí canonical. Bật services[3] TRƯỚC services[1] để chứng
+    // minh chèn giữa — nếu chỉ append thì thứ tự sẽ là [0],[3],[1] và assert này fail.
+    setEnabled(services[3].id, true)
+    setEnabled(services[1].id, true)
+    check('thứ tự canonical sau khi bật lại',
+      runtimes.map(r => r.service.id),
+      [services[0].id, services[1].id, services[3].id])
+
+    persist()
   })
 })
 
