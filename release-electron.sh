@@ -30,7 +30,7 @@ fi
 ./build-electron.sh
 
 ELECTRON_VER=$(node -p "require('./electron/package.json').devDependencies.electron")
-gh release create "$TAG" "$APP_NAME-arm64.zip" --repo "$REPO" \
+gh release create "$TAG" "$APP_NAME-arm64.tar.xz" --repo "$REPO" \
   --title "Electron build $BUILD" \
   --notes "commit \`$COMMIT\` · electron $ELECTRON_VER · arm64
 

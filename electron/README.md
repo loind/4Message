@@ -28,8 +28,8 @@ Không cần Xcode. Chỉ khi `Resources/AppIcon.icns` bị mất thì `build-el
 
 Ra hai thứ ở gốc repo:
 
-- `FBMessElectron.app` (276 MB) — chạy được ngay trên máy build
-- `FBMessElectron-arm64.zip` (129 MB) — để copy sang máy khác
+- `FBMessElectron.app` (230 MB) — chạy được ngay trên máy build
+- `FBMessElectron-arm64.tar.xz` (70 MB) — để copy sang máy khác
 
 ```bash
 ./build-electron.sh --run                    # build xong mở luôn
@@ -37,7 +37,29 @@ FBMESS_ARCH=universal ./build-electron.sh    # kèm slice x86, nếu cần chạ
 NPM_CACHE=/tmp/mycache ./build-electron.sh   # đổi npm cache
 ```
 
-Mặc định `arm64` thôi. Universal gấp đôi dung lượng (488 MB) cho một slice x86 không ai chạy.
+Mặc định `arm64` thôi. Universal gấp đôi dung lượng cho một slice x86 không ai chạy.
+
+### Dung lượng nằm ở đâu
+
+Code của app là **52 KB** (`app.asar`). Toàn bộ phần còn lại là runtime Electron:
+
+| Thành phần | |
+| --- | --- |
+| Electron Framework (nhị phân Chromium) | 182.6 MB |
+| `libvk_swiftshader` + `libGLESv2` + `libffmpeg` | 24.0 MB |
+| Resources (locale pak) | 46.4 MB → **1.3 MB** sau khi cắt |
+| Code của app (`app.asar`) | 0.05 MB |
+
+Nên **dọn code app không giảm được dung lượng** — nó chiếm 0.02%. Hai chỗ cắt thật, đã làm:
+
+| Việc | Artifact |
+| --- | --- |
+| Gốc (zip, đủ 220 locale) | 114.1 MB |
+| Cắt 218 locale, vẫn zip | 102.3 MB |
+| Cắt locale + đổi sang tar.xz | **70.4 MB** |
+
+`libvk_swiftshader` 15.8 MB là software renderer fallback của Vulkan — cắt được nhưng mất
+đường lùi khi GPU driver lỗi. Không cắt.
 
 ### Script làm gì, theo thứ tự
 
@@ -47,9 +69,10 @@ Mặc định `arm64` thôi. Universal gấp đôi dung lượng (488 MB) cho m�
 | 2 | `npm install --save-dev electron` nếu thiếu | `--save-dev`: là devDependency thì packager prune khỏi bundle; là dependency thì nó gói cả runtime 250 MB vào `.app` rồi app tự load Electron trong Electron |
 | 3 | `node electron/selftest.js` | Cổng build. Fail là dừng, không package ra bundle sai |
 | 4 | `@electron/packager` → `.app` | |
-| 5 | `codesign --sign -` (ad-hoc) | Không sign thì Gatekeeper chặn và entitlement (notification) im lặng fail |
-| 6 | `ditto` → `.zip` | `--sequesterRsrc --keepParent` giữ nguyên metadata bundle; `zip` thường làm hỏng symlink trong framework |
-| 7 | In `--version` | Xác nhận bundle vừa ra đúng commit |
+| 5 | Xoá 218 locale pak của Chromium | 45 MB cho thứ tiếng không dùng. PHẢI trước codesign — sửa bundle sau khi sign làm signature vỡ |
+| 6 | `codesign --sign -` (ad-hoc) | Không sign thì Gatekeeper chặn và entitlement (notification) im lặng fail |
+| 7 | `tar` + `xz` → `.tar.xz` | Nhỏ hơn zip 32 MB trên cùng bundle |
+| 8 | In `--version` | Xác nhận bundle vừa ra đúng commit |
 
 `dirty` tính bằng `git status --porcelain`, không phải `git diff --quiet HEAD` — cái sau bỏ
 qua file untracked nên báo clean khi cây đang có file mới.
@@ -72,6 +95,10 @@ bị chặn.
 
 **Không commit `.zip` vào repo.** Nó 114 MB mà GitHub chặn cứng push file > 100 MB, và mỗi
 bản build sẽ nằm vĩnh viễn trong git history. Release asset không vào history, giới hạn 2 GB.
+
+Artifact là `.tar.xz`, giải bằng `tar -xJf` — bsdtar của macOS có liblzma sẵn nên máy đích
+không cần cài gì. Đã kiểm vòng nén/giải: `codesign --verify --deep --strict` pass, symlink
+trong framework nguyên.
 
 **Tải bằng `gh`, không bằng browser.** File browser tải bị gắn `com.apple.quarantine` nên
 Gatekeeper chặn (bundle chỉ ad-hoc sign, không notarize) và phải

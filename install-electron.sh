@@ -17,8 +17,9 @@ trap 'rm -rf "$TMP"' EXIT
 # Tải bằng gh, KHÔNG bằng browser: file browser tải bị gắn com.apple.quarantine nên
 # Gatekeeper chặn (bundle chỉ ad-hoc sign), phải xattr -dr mới mở được. gh chỉ gắn
 # com.apple.provenance — không phải cờ Gatekeeper. Đã kiểm chứng.
-gh release download --repo "$REPO" --pattern '*.zip' --dir "$TMP"
-unzip -q "$TMP"/*.zip -d "$TMP"
+gh release download --repo "$REPO" --pattern '*.tar.xz' --dir "$TMP"
+# -xJf: bsdtar của macOS có liblzma sẵn, không cần cài binary xz.
+tar -xJf "$TMP"/*.tar.xz -C "$TMP"
 [ -d "$TMP/$APP_NAME.app" ] || { echo "zip không chứa $APP_NAME.app"; exit 1; }
 
 "$TMP/$APP_NAME.app/Contents/MacOS/$APP_NAME" --version

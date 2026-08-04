@@ -14,7 +14,7 @@ APP_NAME=FBMessElectron
 SRC=electron
 CACHE="${NPM_CACHE:-$TMPDIR/fbmess-npm-cache}"
 ARCH="${FBMESS_ARCH:-arm64}"
-ZIP="$APP_NAME-$ARCH.zip"
+ARCHIVE="$APP_NAME-$ARCH.tar.xz"
 
 command -v node >/dev/null || { echo "cần node"; exit 1; }
 [ -f Resources/AppIcon.icns ] || ./make-icon.sh
@@ -36,7 +36,7 @@ echo "build-info: build $BUILD · $COMMIT dirty=$DIRTY"
 [ -d "$SRC/node_modules/electron" ] || (cd "$SRC" && npm install --cache "$CACHE" --save-dev electron)
 node "$SRC/selftest.js"
 
-rm -rf "$APP_NAME.app" "$ZIP"
+rm -rf "$APP_NAME.app" "$ARCHIVE"
 (cd "$SRC" && npx --yes --cache "$CACHE" @electron/packager . "$APP_NAME" \
   --platform=darwin --arch="$ARCH" --out=../build-electron --overwrite \
   --app-bundle-id=io.mobio.fbmess.electron \
@@ -45,12 +45,27 @@ rm -rf "$APP_NAME.app" "$ZIP"
 mv "build-electron/$APP_NAME-darwin-$ARCH/$APP_NAME.app" .
 rm -rf build-electron
 
+# Cắt locale pak của Chromium: 218 thứ tiếng không dùng = 45 MB. Giữ en (fallback của
+# Chromium khi thiếu locale hệ thống) + vi. Ảnh hưởng chỉ tới UI có sẵn của Chromium
+# (context menu, spellcheck), không tới nội dung trang hay UI của app.
+# PHẢI xoá TRƯỚC codesign — sửa nội dung bundle sau khi sign làm signature vỡ.
+LOCALES="$APP_NAME.app/Contents/Frameworks/Electron Framework.framework/Versions/A/Resources"
+find "$LOCALES" -maxdepth 1 -name '*.lproj' ! -name 'en.lproj' ! -name 'vi.lproj' \
+  -exec rm -rf {} + 2>/dev/null || true
+
 # Ad-hoc sign: không sign thì Gatekeeper chặn và các entitlement (notification) im lặng fail.
 codesign --force --deep --sign - "$APP_NAME.app" 2>/dev/null || echo "cảnh báo: codesign fail"
 
-ditto -c -k --sequesterRsrc --keepParent "$APP_NAME.app" "$ZIP"
+# tar.xz thay vì zip: 70 MB so với 102 MB trên cùng bundle — nhị phân Chromium nén lzma
+# tốt hơn deflate rõ rệt. Giải nén bằng `tar -xJf`, bsdtar của macOS có liblzma sẵn nên máy
+# đích không cần cài gì. Đã kiểm vòng nén/giải: codesign --verify --deep --strict pass.
+if command -v xz >/dev/null; then
+  tar -cf - "$APP_NAME.app" | xz -T0 -6 > "$ARCHIVE"    # -T0 song song: 13s
+else
+  tar -cJf "$ARCHIVE" "$APP_NAME.app"                    # bsdtar đơn luồng: ~58s
+fi
 
 echo "→ $(pwd)/$APP_NAME.app"
-echo "→ $(pwd)/$ZIP ($(du -h "$ZIP" | cut -f1 | tr -d ' '))"
+echo "→ $(pwd)/$ARCHIVE ($(du -h "$ARCHIVE" | cut -f1 | tr -d ' '))"
 "./$APP_NAME.app/Contents/MacOS/$APP_NAME" --version || true
 if [ "${1:-}" = "--run" ]; then open "$APP_NAME.app"; fi
