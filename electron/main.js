@@ -11,20 +11,173 @@ const {
 } = require('electron')
 const path = require('path')
 const fs = require('fs')
-const { isInternal, isSurface, resolveServices, unreadFromTitle } = require('./services')
+const {
+  SERVICES, isInternal, isSurface, resolveServices, unreadFromTitle, resolveEnabled, railVisible,
+} = require('./services')
+const { loadPrefs, savePrefs } = require('./prefs')
 
 const RAIL_WIDTH = 68
 const services = resolveServices(process.env.FBMESS_SERVICES)
 const keepChrome = process.env.FBMESS_KEEP_FB_CHROME === '1'
 const probe = process.argv.includes('--probe')
+const probeToggle = process.argv.includes('--probe-toggle')
+// Probe không được đụng userData thật: persist() ghi prefs.json, chạy test mà thiếu dòng
+// này từng âm thầm ghi đè lựa chọn kênh thật của user. Cùng thư mục cố định cho mọi probe
+// flag — --probe-prefs (Task 6) phải đọc lại đúng cái --probe-toggle vừa ghi.
+if (probe || probeToggle || process.argv.includes('--probe-prefs')) {
+  const probeDir = path.join(app.getPath('temp'), 'fbmess-probe')
+  app.setPath('userData', probeDir)
+  // --probe và --probe-toggle đều giả định xuất phát từ ĐỦ cả vũ trụ hiện tại: --probe assert
+  // 'rail tiles' khớp services.length, --probe-toggle assert "đủ kênh để test" — prefs.json
+  // rớt lại từ lần probe trước (vd --probe-toggle để lại 3/4 kênh) sẽ thu hẹp vũ trụ đó, làm
+  // lần chạy sau fail oan chứ không phải vì bug thật. Chỉ reset phần TRONG vũ trụ hiện tại,
+  // giữ nguyên id NGOÀI vũ trụ (cùng logic merge của persist()) — không thì test merge ở
+  // Finding 3 tự phá chính dữ liệu nó cần kiểm tra.
+  //
+  // --probe-prefs KHÔNG được liệt ở đây: mode đó tồn tại để ĐỌC LẠI đúng cái đang có trên đĩa
+  // (do --probe-toggle vừa ghi) — reset ở đây sẽ xoá luôn assertion duy nhất mà nó có.
+  if (probe || probeToggle) {
+    // Máy sạch chưa từng chạy probe thì probeDir chưa tồn tại — savePrefs ghi file tạm bên
+    // trong đó nên cần thư mục có sẵn trước, không thì ENOENT văng ra TRƯỚC cả runProbe (ở
+    // đây còn chưa kịp định nghĩa), Electron treo với dialog "App threw an error during load"
+    // trong môi trường headless không ai bấm tắt được.
+    fs.mkdirSync(probeDir, { recursive: true })
+    savePrefs(probeDir, { enabled: outsideUniverse(loadPrefs(probeDir).enabled), railCollapsed: false })
+  }
+}
 const probeOpened = []
+
+let probeFailed = 0
+
+/** Assert cho probe mode: in PASS/FAIL và đếm, để process exit code phản ánh kết quả. */
+function check (label, actual, expected) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected)
+  if (!ok) probeFailed++
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${label}: ${JSON.stringify(actual)}${ok ? '' : ' — kỳ vọng ' + JSON.stringify(expected)}`)
+}
+
+/** Thoát với code khác 0 khi có assert fail — không thì CI coi như pass. */
+function probeExit () {
+  console.log(probeFailed ? `${probeFailed} assert FAIL` : 'tất cả assert PASS')
+  app.isQuitting = true
+  app.exit(probeFailed ? 1 : 0)
+}
+
+/**
+ * Chạy một probe mode. MỌI probe phải đi qua đây, không tự gọi setTimeout.
+ *
+ * `finally` là phần quan trọng: throw trong async callback thành unhandled rejection,
+ * probeExit() không bao giờ chạy, và process TREO vô hạn — phải kill -9. Test harness treo
+ * tệ hơn test fail: CI đứng mãi mà không ai biết vì sao. Đã gặp thật khi activeId chưa tồn tại.
+ */
+function runProbe (delayMs, body) {
+  setTimeout(async () => {
+    try {
+      await body()
+    } catch (e) {
+      probeFailed++
+      console.log(`FAIL probe throw: ${(e && e.stack) || e}`)
+    } finally {
+      probeExit()
+    }
+  }, delayMs)
+}
 
 let win = null
 let railView = null
 let tray = null
-let activeIndex = 0
+// Danh tính kênh đang xem là `id`, KHÔNG phải index: runtimes[] co giãn khi bật/tắt kênh
+// nên mọi index đang giữ đều lệch một cách im lặng.
+let activeId = null
+
+function active () { return runtimes.find(r => r.service.id === activeId) }
+function activeIdx () { return runtimes.findIndex(r => r.service.id === activeId) }
 /** @type {{service: any, view: WebContentsView, unread: string|null}[]} */
 const runtimes = []
+
+let railCollapsed = false
+
+function enabledIds () { return runtimes.map(r => r.service.id) }
+
+/**
+ * Kênh nằm NGOÀI universe hiện tại trong một danh sách `enabled` đã lưu (hoặc `null`).
+ * `null` = chưa chọn gì = mọi kênh đã biết đang bật — KHÔNG phải rỗng. Coi là rỗng thì lần
+ * ghi đầu tiên dưới FBMESS_SERVICES thu hẹp sẽ xoá vĩnh viễn các kênh ngoài universe đó
+ * (dùng chung cho persist() và reset đầu probe — hai chỗ này từng lệch nhau vì mỗi nơi tự
+ * chép lại logic, một nơi quên xử lý `null`).
+ */
+function outsideUniverse (storedEnabled) {
+  return (storedEnabled || SERVICES.map(s => s.id)).filter(id => !services.some(s => s.id === id))
+}
+
+function persist () {
+  const dir = app.getPath('userData')
+  // Giữ id nằm NGOÀI universe hiện tại: chạy với FBMESS_SERVICES thu hẹp không được
+  // biến "universe bị thu hẹp để debug" thành "user đã tắt mấy kênh kia" vĩnh viễn.
+  const outside = outsideUniverse(loadPrefs(dir).enabled)
+  savePrefs(dir, { enabled: [...enabledIds(), ...outside], railCollapsed })
+}
+
+/** Vị trí canonical: đếm số kênh đang bật đứng trước `id` trong `services`. */
+function canonicalSlot (id) {
+  const rank = (sid) => services.findIndex(s => s.id === sid)
+  return runtimes.filter(r => rank(r.service.id) < rank(id)).length
+}
+
+function setEnabled (id, on) {
+  const svc = services.find(s => s.id === id)
+  if (!svc || !win) return
+  const at = runtimes.findIndex(r => r.service.id === id)
+  if (on === (at >= 0)) return
+
+  if (on) {
+    runtimes.splice(canonicalSlot(id), 0, { service: svc, view: makeServiceView(svc), unread: null })
+  } else {
+    // Không cho tắt kênh cuối: cửa sổ rỗng không có đường thoát bằng chuột.
+    if (runtimes.length <= 1) return
+    const rt = runtimes[at]
+    // Đổi active TRƯỚC khi hủy view, không thì active trỏ vào webContents đã chết.
+    if (rt.service.id === activeId) {
+      activeId = (runtimes[at + 1] || runtimes[at - 1]).service.id
+    }
+    win.contentView.removeChildView(rt.view)
+    rt.view.webContents.close()
+    runtimes.splice(at, 1)
+  }
+
+  persist()
+  // selectId(activeId) đã tự chạy layout()/pushRailState()/updateBadge() — gọi lại ba hàm đó
+  // ở đây là dư, mỗi lần bật/tắt kênh render rail hai lần cho một lần đổi.
+  selectId(activeId)
+  buildMenu()
+}
+
+function toggleRail () {
+  railCollapsed = !railCollapsed
+  persist()
+  layout()
+  buildMenu()
+}
+
+/** Item bật/tắt kênh, dùng chung cho app menu và tray menu. */
+function serviceToggleItems () {
+  const only = runtimes.length <= 1
+  return services.map(s => {
+    const on = runtimes.some(r => r.service.id === s.id)
+    return {
+      label: s.title, type: 'checkbox', checked: on,
+      // Tắt kênh cuối cùng để lại cửa sổ rỗng — disable thay vì im lặng bỏ qua, để
+      // người dùng thấy được vì sao không bấm được.
+      enabled: !(on && only),
+      // KHÔNG dùng `on` đã đóng closure ở đây: tray rebuild mỗi 5s (setInterval bên dưới),
+      // nên bấm app-menu đổi trạng thái rồi bấm tray trong vòng 5s đó thấy `on` cũ — click
+      // gọi setEnabled(id, !cũ) tức là bật lại đúng cái đã tắt, item coi như không phản ứng.
+      // `checked`/`enabled` phía trên vẫn dùng giá trị lúc dựng menu — chỉ quyết định lúc
+      // click mới cần đọc sống.
+      click: () => setEnabled(s.id, !runtimes.some(r => r.service.id === s.id)),
+    }
+  })
+}
 
 function buildInfo () {
   try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'build-info.json'), 'utf8')) }
@@ -51,16 +204,16 @@ app.userAgentFallback = app.userAgentFallback
 function layout () {
   if (!win) return
   const { width, height } = win.getContentBounds()
-  const railW = services.length > 1 ? RAIL_WIDTH : 0
+  const railW = railVisible(runtimes.length, railCollapsed) ? RAIL_WIDTH : 0
   if (railView) railView.setBounds({ x: 0, y: 0, width: railW, height })
-  const rt = runtimes[activeIndex]
+  const rt = active()
   if (rt) rt.view.setBounds({ x: railW, y: 0, width: Math.max(0, width - railW), height })
 }
 
 function pushRailState () {
   if (!railView) return
   const state = {
-    active: activeIndex,
+    active: activeIdx(),
     items: runtimes.map(r => ({
       id: r.service.id, title: r.service.title, tint: r.service.tint, unread: r.unread,
     })),
@@ -71,7 +224,7 @@ function pushRailState () {
 }
 
 function updateBadge () {
-  const rt = runtimes[activeIndex]
+  const rt = active()
   const total = runtimes.reduce((n, r) => n + (r.unread ? parseInt(r.unread, 10) || 0 : 0), 0)
   if (app.dock) app.dock.setBadge(total > 0 ? String(total) : '')
   // Số cạnh icon menu bar — buildTray chạy sau createWindow nên tray có thể chưa tồn tại.
@@ -107,7 +260,9 @@ function makeServiceView (service) {
 
     // Self-check 2 mốc, chỉ cảnh báo ở mốc sau: nav của Threads render trễ nên mốc sớm
     // luôn báo thiếu, mà cảnh báo luôn sai thì người ta quen bỏ qua cảnh báo thật.
-    const check = async (phase) => {
+    // Tên riêng (không phải `check`) — trùng tên với assert của probe là cái bẫy cho lần sửa
+    // sau: shadow biến ngoài closure, lỗi chỉ lộ khi chạy probe chứ không lộ lúc đọc code.
+    const checkChrome = async (phase) => {
       const js = `JSON.stringify(${JSON.stringify(service.hideRules)}.map(([n,s]) => n + '=' + document.querySelectorAll(s).length))`
       try {
         const hits = JSON.parse(await wc.executeJavaScript(js))
@@ -116,8 +271,8 @@ function makeServiceView (service) {
         else if (phase === 'late') console.warn(`[${service.id}] CẢNH BÁO chrome: ${miss.join(',')} không khớp gì`)
       } catch {}
     }
-    setTimeout(() => check('early'), 8000)
-    setTimeout(() => check('late'), 25000)
+    setTimeout(() => checkChrome('early'), 8000)
+    setTimeout(() => checkChrome('late'), 25000)
   })
 
   // Link user click ngoài surface → browser. KHÔNG giữ trong app: link facebook.com trong
@@ -138,12 +293,13 @@ function makeServiceView (service) {
   return view
 }
 
-function select (i) {
-  if (i < 0 || i >= runtimes.length || !win) return
-  const prev = runtimes[activeIndex]
-  if (prev && prev.view !== runtimes[i].view) win.contentView.removeChildView(prev.view)
-  activeIndex = i
-  win.contentView.addChildView(runtimes[i].view)
+function selectId (id) {
+  const next = runtimes.find(r => r.service.id === id)
+  if (!next || !win) return
+  const prev = active()
+  if (prev && prev !== next) win.contentView.removeChildView(prev.view)
+  activeId = id
+  win.contentView.addChildView(next.view)
   layout()
   pushRailState()
   updateBadge()
@@ -155,10 +311,15 @@ function createWindow () {
     title: 'FB Mess', show: false,
   })
 
-  for (const s of services) {
+  const prefs = loadPrefs(app.getPath('userData'))
+  railCollapsed = prefs.railCollapsed
+  // Chỉ dựng view cho kênh đang bật — kênh tắt không tạo view rồi hủy.
+  for (const s of resolveEnabled(services, prefs)) {
     runtimes.push({ service: s, view: makeServiceView(s), unread: null })
   }
 
+  // Rail dựng khi vũ trụ có nhiều hơn 1 kênh, còn hiện hay không thì layout() quyết —
+  // vì số kênh bật đổi được lúc chạy, không thể quyết một lần lúc khởi động.
   if (services.length > 1) {
     railView = new WebContentsView({ webPreferences: { preload: path.join(__dirname, 'rail-preload.js') } })
     railView.webContents.loadFile(path.join(__dirname, 'rail.html'))
@@ -166,6 +327,7 @@ function createWindow () {
     railView.webContents.on('did-finish-load', pushRailState)
   }
 
+  activeId = runtimes[0].service.id
   win.contentView.addChildView(runtimes[0].view)
   layout()
   win.on('resize', layout)
@@ -197,12 +359,15 @@ function buildTray () {
     tray.setContextMenu(Menu.buildFromTemplate([
       ...runtimes.map((r, i) => ({
         label: r.service.title + (r.unread ? `  (${r.unread})` : ''),
-        type: 'radio', checked: i === activeIndex,
-        click: () => { select(i); win.show() },
+        type: 'radio', checked: r.service.id === activeId,
+        click: () => { selectId(r.service.id); win.show() },
       })),
       { type: 'separator' },
+      { label: 'Kênh', submenu: serviceToggleItems() },
+      { label: railCollapsed ? 'Hiện cột kênh' : 'Ẩn cột kênh', enabled: runtimes.length > 1, click: toggleRail },
+      { type: 'separator' },
       { label: 'Hiện/ẩn cửa sổ', accelerator: 'Cmd+Shift+M', click: toggleWindow },
-      { label: 'Tải lại', click: () => runtimes[activeIndex].view.webContents.reload() },
+      { label: 'Tải lại', click: () => active().view.webContents.reload() },
       { type: 'separator' },
       { label: 'Thoát', click: () => { app.isQuitting = true; app.quit() } },
     ]))
@@ -218,15 +383,29 @@ function buildMenu () {
       label: app.getName(),
       submenu: [
         ...runtimes.map((r, i) => ({
-          label: r.service.title, accelerator: `Cmd+${i + 1}`, click: () => select(i),
+          label: r.service.title, accelerator: `Cmd+${i + 1}`,
+          click: () => selectId(r.service.id),
         })),
         { type: 'separator' },
-        { label: 'Về trang chính', accelerator: 'Cmd+Shift+H', click: () => runtimes[activeIndex].view.webContents.loadURL(runtimes[activeIndex].service.url) },
-        { label: 'Quay lại', accelerator: 'Cmd+[', click: () => { const wc = runtimes[activeIndex].view.webContents; if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack() } },
-        { label: 'Tải lại', accelerator: 'Cmd+R', click: () => runtimes[activeIndex].view.webContents.reload() },
+        { label: 'Về trang chính', accelerator: 'Cmd+Shift+H', click: () => active().view.webContents.loadURL(active().service.url) },
+        { label: 'Quay lại', accelerator: 'Cmd+[', click: () => { const wc = active().view.webContents; if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack() } },
+        { label: 'Tải lại', accelerator: 'Cmd+R', click: () => active().view.webContents.reload() },
         { type: 'separator' },
         { label: 'Ẩn cửa sổ', accelerator: 'Cmd+W', click: () => win.hide() },
         { label: 'Thoát', accelerator: 'Cmd+Q', click: () => { app.isQuitting = true; app.quit() } },
+      ],
+    },
+    {
+      label: 'Kênh',
+      submenu: [
+        ...serviceToggleItems(),
+        { type: 'separator' },
+        {
+          label: railCollapsed ? 'Hiện cột kênh' : 'Ẩn cột kênh',
+          accelerator: 'Cmd+0',
+          enabled: runtimes.length > 1,
+          click: toggleRail,
+        },
       ],
     },
     { label: 'Sửa', submenu: [
@@ -242,7 +421,11 @@ app.whenReady().then(() => {
     cb(permission === 'notifications' || permission === 'media')
   })
 
-  ipcMain.on('rail:select', (_e, i) => select(i))
+  // Rail gửi vị trí tile; đổi ngay sang id vì index chỉ đúng tại thời điểm render.
+  ipcMain.on('rail:select', (_e, i) => {
+    const rt = runtimes[i]
+    if (rt) selectId(rt.service.id)
+  })
   // URL đến từ nội dung trang — không tin. shell.openExternal với scheme lạ là lỗ hổng.
   ipcMain.on('fbmess:open-external', (_e, url) => {
     if (!/^https?:\/\//i.test(url)) return
@@ -259,11 +442,12 @@ app.whenReady().then(() => {
 
   // Kiểm tra wiring không cần nhìn màn hình: `electron . --probe`. Cần cho máy build không
   // có GUI session — screencapture ở đây chỉ ra desktop trống nên không soi bằng mắt được.
-  if (probe) setTimeout(async () => {
+  if (probe) runProbe(25000, async () => {
     const tiles = railView
       ? await railView.webContents.executeJavaScript('document.querySelectorAll(".tile").length')
       : 0
-    console.log(`rail tiles: ${tiles} (kỳ vọng ${services.length})`)
+    check('rail tiles', tiles, services.length)
+    check('activeId', activeId, services[0].id)
     for (const r of runtimes) {
       const wc = r.view.webContents
       const login = await wc.executeJavaScript(
@@ -273,7 +457,7 @@ app.whenReady().then(() => {
     }
     // Link policy: click phải là tầng quyết định, không phải navigation. Test bằng click
     // tổng hợp trên chính trang đang load — chứng minh preload chạy trong ngữ cảnh thật.
-    const wc = runtimes[0].view.webContents
+    const wc = active().view.webContents
     const clickOn = async (href) => {
       await wc.executeJavaScript(`(() => {
         const a = document.createElement('a')
@@ -292,9 +476,131 @@ app.whenReady().then(() => {
     console.log(`link ngoài  → openExternal: ${afterExternal > before ? 'CÓ (đúng)' : 'KHÔNG (SAI)'}`)
     console.log(`link surface → openExternal: ${afterSurface > afterExternal ? 'CÓ (SAI)' : 'KHÔNG (đúng)'}`)
 
-    app.isQuitting = true
-    app.quit()
-  }, 25000)
+  })
+
+  if (process.argv.includes('--probe-toggle')) runProbe(20000, async () => {
+    const pids = new Map(runtimes.map(r => [r.service.id, r.view.webContents.getOSProcessId()]))
+    console.log(`bật ${runtimes.length} kênh: ${[...pids.entries()].map(([k, v]) => k + '=' + v).join(' ')}`)
+
+    // Precondition: universe 1 kênh thì vòng lặp tắt bên dưới không có gì để tắt, leaked
+    // rỗng so rỗng PASS vô nghĩa — đúng lúc phải chứng minh process thật sự chết.
+    check('universe đủ để test tắt kênh', services.length >= 2, true)
+
+    // Precondition: nếu prefs.json (kể cả của chính probe trước đó) để lại ít hơn đủ kênh,
+    // vòng lặp tắt bên dưới không tắt gì và assert liveness PASS rỗng-so-rỗng một cách vô
+    // nghĩa — đúng lúc nó phải chứng minh process thật sự chết.
+    check('đủ kênh để test', pids.size, services.length)
+
+    // --- Kịch bản nguy hiểm nhất của setEnabled: tắt ĐÚNG kênh đang xem ---
+    // activeId lúc khởi động luôn là runtimes[0].service.id (gán trong createWindow). Vòng
+    // lặp "tắt tất cả trừ keep" bên dưới cố tình không đụng runtimes[0], nên nếu thiếu đoạn
+    // này thì nhánh `if (rt.service.id === activeId)` trong setEnabled — đổi activeId sang
+    // láng giềng TRƯỚC khi removeChildView/close() view — không bao giờ chạy trong cả bộ
+    // test. Đây đúng là lỗ hổng bản trước của probe này mắc phải: `keep` và `activeId` khi
+    // đó cùng là runtimes[0], nên so `keep === keep` không thể fail dù thứ tự có bị đảo.
+    const activeAtStart = activeId
+    const activeAtStartPid = pids.get(activeAtStart)
+    const survivorExpected = runtimes[1].service.id
+    setEnabled(activeAtStart, false)
+
+    check('kênh đang xem biến mất khỏi runtimes sau khi tắt', runtimes.some(r => r.service.id === activeAtStart), false)
+    check('activeId chuyển sang láng giềng còn sống', activeId, survivorExpected)
+    // Nếu setEnabled lỡ destroy view TRƯỚC khi reassign activeId, active() ở đây sẽ trỏ vào
+    // webContents vừa .close() (hoặc vào runtime đã bị splice mất) — isDestroyed() bắt được
+    // ngay tại chỗ, không cần đợi 3s để process OS chết mới biết.
+    check('active() còn dùng được ngay sau khi tắt kênh đang xem', active().view.webContents.isDestroyed(), false)
+
+    // Trả về đúng trạng thái ban đầu — phần còn lại của bộ test bên dưới giả định runtimes[0]
+    // là kênh sống sót cuối cùng, nên không phải viết lại các assert đã có.
+    setEnabled(activeAtStart, true)
+    selectId(activeAtStart)
+    check('activeId quay lại kênh gốc sau khi bật lại', activeId, activeAtStart)
+
+    const keep = runtimes[0].service.id
+    for (const id of [...pids.keys()].filter(x => x !== keep)) setEnabled(id, false)
+    // Process chết không đồng bộ với close() — chờ rồi mới kiểm liveness.
+    await new Promise(r => setTimeout(r, 3000))
+
+    check('còn bật', runtimes.length, 1)
+    check('activeId không đổi vì kênh bị tắt trong vòng lặp trên không phải kênh đang xem', activeId, keep)
+
+    // Điều kiện MẠNH NHẤT của thiết kế: process renderer của kênh tắt phải CHẾT.
+    // Process chết là RAM đã trả về OS — khác với đo footprint, nơi bmalloc trả page chậm
+    // và từng làm số liệu bản WKWebView vô nghĩa.
+    const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
+    const leaked = [...pids.entries()].filter(([id, pid]) => id !== keep && alive(pid)).map(([id]) => id)
+    check('process kênh đã tắt còn sống', leaked, [])
+    // Process GỐC của kênh vừa tắt-lúc-đang-xem-rồi-bật-lại ở trên: bật lại tạo process MỚI,
+    // process CŨ phải bị OS thu hồi y như mọi kênh tắt khác, không phải vì nó là activeId.
+    check('process gốc của kênh vừa tắt lúc đang xem còn sống', alive(activeAtStartPid), false)
+
+    check('rail hiện khi còn 1 kênh', railVisible(runtimes.length, railCollapsed), false)
+
+    // Tắt kênh cuối cùng phải là no-op: cửa sổ rỗng không có đường thoát bằng chuột.
+    setEnabled(keep, false)
+    check('còn bật sau khi thử tắt kênh cuối', runtimes.length, 1)
+
+    if (services.length >= 4) {
+      // Bật lại phải vào đúng vị trí canonical. Bật services[3] TRƯỚC services[1] để chứng
+      // minh chèn giữa — nếu chỉ append thì thứ tự sẽ là [0],[3],[1] và assert này fail.
+      setEnabled(services[3].id, true)
+      setEnabled(services[1].id, true)
+      check('thứ tự canonical sau khi bật lại',
+        runtimes.map(r => r.service.id),
+        [services[0].id, services[1].id, services[3].id])
+    } else {
+      // services[3]/services[1] đánh index tuyệt đối — universe hẹp hơn 4 kênh (vd chạy với
+      // FBMESS_SERVICES thu hẹp để debug) sẽ .id trên undefined và văng exception thay vì
+      // FAIL có ý nghĩa. Bỏ qua và NÓI RA, không thì coverage bị thu hẹp âm thầm trông như
+      // full coverage.
+      console.log(`bỏ qua check thứ tự canonical: universe chỉ ${services.length} kênh, cần >= 4`)
+    }
+
+    // ⌘0 phải độc lập với quy tắc "còn 1 kênh": 3 kênh bật mà ẩn tay thì rail vẫn phải ẩn.
+    // Đó là toàn bộ lý do có hai trạng thái tách rời.
+    toggleRail()
+    check('ẩn tay: railCollapsed', railCollapsed, true)
+    check('ẩn tay: rail hiện', railVisible(runtimes.length, railCollapsed), false)
+    toggleRail()
+    check('hiện lại: railCollapsed', railCollapsed, false)
+    check('hiện lại: rail hiện', railVisible(runtimes.length, railCollapsed), true)
+
+    const kenh = Menu.getApplicationMenu().items.find(i => i.label === 'Kênh')
+    check('có menu Kênh', !!kenh, true)
+    // 4 kênh + separator + ẩn/hiện cột
+    check('số item menu Kênh', kenh.submenu.items.length, services.length + 2)
+    check('kênh đang tick',
+      kenh.submenu.items.filter(i => i.type === 'checkbox' && i.checked).map(i => i.label).sort(),
+      runtimes.map(r => r.service.title).sort())
+    check('nhãn ẩn/hiện cột', kenh.submenu.items[services.length + 1].label, 'Ẩn cột kênh')
+
+    // Mục ẩn/hiện cột kênh trên TRAY dùng chung guard `enabled: runtimes.length > 1` với item
+    // này ở app-menu (fix round 1 — tray thiếu guard, đã thêm vào buildTray()). Không đọc lại
+    // được item thật trên tray để assert trực tiếp: Electron Tray không có getContextMenu()
+    // (xác nhận qua electron.d.ts và probe thủ công tạo Tray + setContextMenu rồi liệt kê
+    // prototype — không có getter nào). Đọc lại item app-menu (đọc được thật) làm bằng chứng
+    // guard đúng — chạy thêm với FBMESS_SERVICES=messenger để thấy nhánh false.
+    check('app-menu ẩn/hiện cột: enabled khớp runtimes.length > 1',
+      kenh.submenu.items[services.length + 1].enabled, runtimes.length > 1)
+
+    // Để lại railCollapsed=true trước khi ghi prefs: hai lần toggle ở trên đưa nó về false
+    // (== default), nên nếu --probe-prefs so railCollapsed với prefs.json mà cả hai đều là
+    // default false thì assert PASS dù loadPrefs không hề được đọc — false so false không
+    // chứng minh được gì. Thêm một lần toggle nữa để prefs.json mang giá trị KHÁC default.
+    toggleRail()
+    check('railCollapsed=true trước khi ghi prefs', railCollapsed, true)
+
+    persist()
+  })
+
+  if (process.argv.includes('--probe-prefs')) runProbe(15000, () => {
+    // Kỳ vọng đọc từ prefs.json mà --probe-toggle vừa ghi, KHÔNG hardcode: test này chứng
+    // minh loadPrefs được nối vào createWindow, nên phải so với file trên đĩa.
+    const saved = loadPrefs(app.getPath('userData'))
+    check('kênh bật khớp prefs.json', enabledIds(), saved.enabled)
+    check('railCollapsed khớp prefs.json', railCollapsed, saved.railCollapsed)
+    check('không dùng cả vũ trụ', enabledIds().length < services.length, true)
+  })
 })
 
 app.on('before-quit', () => { app.isQuitting = true })

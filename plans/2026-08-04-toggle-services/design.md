@@ -64,7 +64,7 @@ dùng có thể sửa tay và là đường vỡ dễ nhất của tính năng n
 
 - **Khởi động**: chỉ dựng view cho kênh đang bật. Kênh tắt không tạo view — không phải tạo
   rồi hủy.
-- **Tắt**: `removeChildView` → `webContents.destroy()` → splice khỏi `runtimes`.
+- **Tắt**: `removeChildView` → `webContents.close()` → splice khỏi `runtimes`.
 - **Bật**: tạo view, `loadURL`, chèn vào `runtimes` đúng vị trí canonical.
 
 Destroy **không làm logout**: session nằm ở partition `persist:fbmess`, không nằm trong view.
@@ -84,7 +84,7 @@ Thêm ⌘0 ẩn/hiện rail, nhãn đổi theo trạng thái như bản Swift: `
 | Tình huống | Xử lý |
 | --- | --- |
 | Tắt kênh cuối cùng | Menu item **disable** khi `enabled == 1`. Không cho tắt |
-| Tắt kênh đang xem | Nhảy sang kênh bật đầu tiên theo thứ tự canonical |
+| Tắt kênh đang xem | Nhảy sang kênh **láng giềng** còn bật trong `runtimes` (kế tiếp, hoặc kế trước nếu đó là kênh cuối) |
 | ⌘1–4 | Trỏ kênh bật thứ N — đúng vị trí trên rail. Không stable theo service |
 | Bật lại kênh | `did-finish-load` tự chèn lại CSS ẩn chrome, không cần đường riêng |
 | `prefs.json` hỏng | Về mặc định, log cảnh báo, không crash |
@@ -96,13 +96,14 @@ Thêm ⌘0 ẩn/hiện rail, nhãn đổi theo trạng thái như bản Swift: `
 | Tầng | Kiểm gì |
 | --- | --- |
 | `selftest.js` (cổng build) | `resolveEnabled` với: id lạ, ngoài universe, rỗng, trùng. `railVisible` cả 4 tổ hợp |
-| `--probe` | Số tile rail khớp số kênh bật; view của kênh tắt **không tồn tại** |
+| `--probe` | Số tile rail khớp số kênh bật |
+| `--probe-toggle` | Tắt/bật kênh lúc chạy; process renderer của kênh tắt **không còn sống** |
 | Tay, trên máy dùng | Tắt kênh → `measure.sh` thấy footprint giảm. Bật lại → kênh load và vào đúng vị trí rail |
 | `preview-rail.js` | Rail 1 tile / 2 tile / 4 tile render đúng ở cả light và dark |
 
-Điểm đáng đo nhất: **footprint có giảm thật khi tắt kênh không.** Nếu `webContents.destroy()`
+Điểm đáng đo nhất: **footprint có giảm thật khi tắt kênh không.** Nếu `webContents.close()`
 không trả RAM về ngay (bmalloc trả page chậm — đã gặp ở bản WKWebView), thì cả lý do chọn
-destroy sụp, và phương án lùi về "chỉ ẩn tile".
+đóng view sụp, và phương án lùi về "chỉ ẩn tile".
 
 ## Không làm (YAGNI)
 

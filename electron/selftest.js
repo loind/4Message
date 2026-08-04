@@ -61,4 +61,59 @@ for (const s of SERVICES) {
   assert.ok(rail.includes(`${s.id}: '`), `thiếu glyph rail cho service: ${s.id}`)
 }
 
+const { resolveEnabled, railVisible } = require('./services')
+
+const ALL = SERVICES
+const ids = (list) => list.map(s => s.id)
+
+// Thứ tự rail phải canonical, KHÔNG theo thứ tự người dùng bấm bật.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: ['zalo', 'messenger'] })), ['messenger', 'zalo'])
+// Không bao giờ 0 kênh — cửa sổ rỗng là trạng thái không có đường thoát bằng chuột.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: [] })), ids(ALL))
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: ['nope'] })), ids(ALL))
+assert.deepStrictEqual(ids(resolveEnabled(ALL, {})), ids(ALL))
+// prefs.json là file người dùng sửa được bằng tay → kiểu sai phải không làm sập.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: 'messenger' })), ids(ALL))
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: [null, 3] })), ids(ALL))
+// Id ngoài vũ trụ FBMESS_SERVICES bị bỏ.
+const TWO = resolveServices('messenger,instagram')
+assert.deepStrictEqual(ids(resolveEnabled(TWO, { enabled: ['zalo'] })), ids(TWO))
+assert.deepStrictEqual(ids(resolveEnabled(TWO, { enabled: ['instagram'] })), ['instagram'])
+// Trùng lặp không sinh tile trùng.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: ['zalo', 'zalo'] })), ['zalo'])
+
+assert.strictEqual(railVisible(1, false), false)
+assert.strictEqual(railVisible(2, false), true)
+assert.strictEqual(railVisible(2, true), false)
+assert.strictEqual(railVisible(1, true), false)
+
+const os = require('os')
+const fs = require('fs')
+const path = require('path')
+const { loadPrefs, savePrefs } = require('./prefs')
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fbmess-prefs-'))
+
+// Chưa có file → mặc định. enabled=null nghĩa "chưa chọn", khác [] nghĩa "chọn rỗng".
+assert.deepStrictEqual(loadPrefs(dir), { enabled: null, railCollapsed: false })
+
+// File rác không được làm sập app.
+fs.writeFileSync(path.join(dir, 'prefs.json'), '{ this is not json')
+assert.deepStrictEqual(loadPrefs(dir), { enabled: null, railCollapsed: false })
+
+// Kiểu sai từng field cũng phải chịu được.
+fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ enabled: 'messenger', railCollapsed: 'true' }))
+assert.deepStrictEqual(loadPrefs(dir), { enabled: null, railCollapsed: false })
+fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ enabled: ['messenger', 7, null] }))
+assert.deepStrictEqual(loadPrefs(dir), { enabled: ['messenger'], railCollapsed: false })
+
+// Round trip.
+savePrefs(dir, { enabled: ['messenger', 'zalo'], railCollapsed: true })
+assert.deepStrictEqual(loadPrefs(dir), { enabled: ['messenger', 'zalo'], railCollapsed: true })
+
+// Ghi xong không được để lại file tạm.
+assert.deepStrictEqual(fs.readdirSync(dir), ['prefs.json'])
+
+fs.rmSync(dir, { recursive: true, force: true })
+
 console.log(`selftest OK (${SERVICES.length} services)`)
