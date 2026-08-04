@@ -583,6 +583,13 @@ app.whenReady().then(() => {
     check('app-menu ẩn/hiện cột: enabled khớp runtimes.length > 1',
       kenh.submenu.items[services.length + 1].enabled, runtimes.length > 1)
 
+    // Để lại railCollapsed=true trước khi ghi prefs: hai lần toggle ở trên đưa nó về false
+    // (== default), nên nếu --probe-prefs so railCollapsed với prefs.json mà cả hai đều là
+    // default false thì assert PASS dù loadPrefs không hề được đọc — false so false không
+    // chứng minh được gì. Thêm một lần toggle nữa để prefs.json mang giá trị KHÁC default.
+    toggleRail()
+    check('railCollapsed=true trước khi ghi prefs', railCollapsed, true)
+
     persist()
   })
 
