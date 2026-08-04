@@ -18,7 +18,6 @@ const SERVICES = [
     id: 'messenger',
     title: 'Messenger',
     url: 'https://www.facebook.com/messages/',
-    symbol: '💬',
     tint: '#4a84ff',
     // pathPrefix gắn với HOST chứ không phải service: facebook.com chỉ có /messages là
     // chat, còn messenger.com và m.me thì cả domain đều là chat.
@@ -41,7 +40,6 @@ const SERVICES = [
     id: 'instagram',
     title: 'Instagram',
     url: 'https://www.instagram.com/direct/inbox/',
-    symbol: '📷',
     tint: '#e84190',
     surface: [{ host: 'instagram.com', pathPrefix: '/direct' }],
     // Rail trái nằm NGOÀI [role="navigation"] — nhắm theo href, độc lập ngôn ngữ và
@@ -57,7 +55,6 @@ const SERVICES = [
     title: 'Threads',
     // DM của Threads ở /messages/, KHÔNG phải /direct/ — suy diễn theo Instagram là sai.
     url: 'https://www.threads.com/messages/',
-    symbol: '@',
     tint: '#57575f',
     surface: [
       { host: 'threads.com', pathPrefix: '/messages' },

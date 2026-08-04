@@ -1,4 +1,5 @@
 <meta charset="utf-8">
+<title>rail</title>
 <style>
   :root { color-scheme: light dark; }
   html, body { margin: 0; height: 100%; overflow: hidden;
@@ -6,29 +7,38 @@
   #rail { display: flex; flex-direction: column; align-items: center;
     gap: 10px; padding: 12px 10px; }
   .tile { position: relative; width: 48px; height: 48px; border: 0; border-radius: 12px;
-    display: grid; place-items: center; font-size: 22px; cursor: pointer;
-    color: #fff; }
-  /* Màu ĐỤC, không dùng alpha: alpha phủ nền không biết trước làm light mode nhạt toẹt
-     và tile inactive nổi hơn active — đã mắc lỗi này ở bản Swift. */
-  .tile.inactive { filter: saturate(0.45) brightness(0.75); }
-  .tile.active { outline: 2.5px solid color-mix(in srgb, CanvasText 75%, transparent);
-    outline-offset: 0; }
-  .badge { position: absolute; top: 2px; right: 2px; min-width: 15px; height: 15px;
+    display: grid; place-items: center; cursor: pointer; padding: 0; }
+  /* Màu bệt: nền tint đặc, glyph trắng đơn sắc, không gradient/emoji/filter.
+     KHÔNG dùng alpha hay filter để làm mờ tile inactive — saturate/brightness biến
+     #e84190 thành đỏ nâu xỉn, còn alpha thì phụ thuộc nền nên light mode nhạt toẹt.
+     Phân biệt active bằng viền, màu giữ nguyên để nhận ra kênh không cần đọc glyph. */
+  .tile svg { width: 26px; height: 26px; fill: #fff; display: block; }
+  .tile.active { outline: 2px solid color-mix(in srgb, CanvasText 60%, transparent);
+    outline-offset: 2px; }
+  .badge { position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px;
     padding: 0 4px; border-radius: 8px; background: #ff3b30; color: #fff;
-    font: 600 9.5px/15px -apple-system, system-ui; text-align: center; }
+    font: 600 10px/16px -apple-system, system-ui; text-align: center;
+    box-shadow: 0 0 0 2px Canvas; }
 </style>
 <div id="rail"></div>
 <script>
+  // Glyph là chuyện trình bày nên nằm ở đây, không nhồi vào services.js.
+  const GLYPHS = {
+    messenger: '<path d="M12 2C6.48 2 2 6.13 2 11.22c0 2.9 1.44 5.48 3.7 7.18V22l3.4-1.87c.91.25 1.88.39 2.9.39 5.52 0 10-4.13 10-9.3C22 6.13 17.52 2 12 2zm.99 12.2-2.53-2.7-4.94 2.7 5.43-5.77 2.6 2.7 4.87-2.7-5.43 5.77z"/>',
+    instagram: '<path d="M8 2h8a6 6 0 0 1 6 6v8a6 6 0 0 1-6 6H8a6 6 0 0 1-6-6V8a6 6 0 0 1 6-6zm0 2.2A3.8 3.8 0 0 0 4.2 8v8A3.8 3.8 0 0 0 8 19.8h8a3.8 3.8 0 0 0 3.8-3.8V8A3.8 3.8 0 0 0 16 4.2H8z"/><path d="M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0 2.2a2.8 2.8 0 1 0 0 5.6 2.8 2.8 0 0 0 0-5.6z"/><circle cx="17.4" cy="6.6" r="1.3"/>',
+    threads: '<path d="M12 2a10 10 0 1 0 5.6 18.3l-1.1-1.7A8 8 0 1 1 20 12c0 2-.6 3.3-1.8 3.3-.8 0-1.2-.5-1.2-1.6V7.9h-2.1v.9A4.9 4.9 0 0 0 7.1 12a4.9 4.9 0 0 0 7.8 4 3 3 0 0 0 2.8 1.5c2.6 0 4.3-2.2 4.3-5.5A10 10 0 0 0 12 2zm0 7.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6z"/>',
+  }
+
   window.render = (state) => {
     const el = document.getElementById('rail')
     el.innerHTML = ''
     state.items.forEach((it, i) => {
       const b = document.createElement('button')
-      b.className = 'tile ' + (i === state.active ? 'active' : 'inactive')
+      b.className = 'tile' + (i === state.active ? ' active' : '')
       b.style.background = it.tint
       b.title = it.title
-      b.setAttribute('aria-label', it.title)
-      b.textContent = it.symbol
+      b.setAttribute('aria-label', it.title + (it.unread ? ` (${it.unread} chưa đọc)` : ''))
+      b.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[it.id] || ''}</svg>`
       if (it.unread) {
         const d = document.createElement('span')
         d.className = 'badge'; d.textContent = it.unread

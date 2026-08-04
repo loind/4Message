@@ -62,8 +62,7 @@ function pushRailState () {
   const state = {
     active: activeIndex,
     items: runtimes.map(r => ({
-      id: r.service.id, title: r.service.title, symbol: r.service.symbol,
-      tint: r.service.tint, unread: r.unread,
+      id: r.service.id, title: r.service.title, tint: r.service.tint, unread: r.unread,
     })),
   }
   railView.webContents.executeJavaScript(

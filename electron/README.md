@@ -27,6 +27,15 @@ In ra: số tile của rail, URL + title + trạng thái login của từng serv
 link policy (link ngoài phải ra browser, link surface phải giữ trong app). Cần vì máy build
 không có GUI session — `screencapture` ở đó chỉ ra desktop trống.
 
+## Xem rail trước khi ship
+
+```bash
+cd electron && ./node_modules/.bin/electron preview-rail.js /tmp/rail
+```
+
+Sinh `/tmp/rail-light.png` + `/tmp/rail-dark.png` từ chính `rail.html`. Bắt buộc soi cả hai
+theme: bug rail chỉ hiện ở một theme đã xảy ra rồi (`docs/ui-discipline.md`).
+
 ## Env
 
 | Biến | Tác dụng |
