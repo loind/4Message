@@ -1,6 +1,7 @@
 # FB Mess
 
-Client chat native cho macOS: **Messenger, Instagram DM, Threads DM** trong một app.
+Client chat native cho macOS: **Messenger, Instagram DM, Threads (feed + DM), Zalo** trong
+một app.
 Swift + AppKit, mỗi service là một `WKWebView` riêng. Thay thế Franz: nhẹ hơn, khởi động
 tức thì, không quảng cáo Pro.
 
@@ -81,8 +82,8 @@ của messenger.com nằm nguyên. Số liệu đầy đủ:
 
 ## Service và ẩn chrome
 
-`FBMESS_SERVICES=messenger,instagram,threads` (mặc định chỉ `messenger`). Mỗi service là
-một origin riêng → cookie, IndexedDB, device E2EE riêng; phải đăng nhập từng service.
+`FBMESS_SERVICES=messenger,instagram,threads,zalo` (mặc định chỉ `messenger`). Mỗi service
+là một origin riêng → cookie, IndexedDB, device E2EE riêng; phải đăng nhập từng service.
 
 Ba cách đổi kênh:
 
@@ -90,14 +91,14 @@ Ba cách đổi kênh:
 | --- | --- |
 | **Rail dọc trong cửa sổ** | Hiện khi có >1 service. Tile màu thương hiệu, kênh đang xem sáng + viền trắng |
 | Menu **Service** | Trên thanh menu, có dấu tick |
-| ⌘1 / ⌘2 / ⌘3 | |
+| ⌘1 / ⌘2 / ⌘3 / ⌘4 | |
 
 Rail hiện **số chưa đọc của từng kênh** — đó là lý do chính để có nó, thấy kênh khác có
 tin mới mà không phải bấm qua. Với 1 service thì rail không dựng (chiếm chỗ mà không chọn
 được gì).
 
 Thu gọn rail: **Service → Ẩn cột kênh** (⌘0). Trạng thái lưu vào `UserDefaults` nên nhớ qua
-lần chạy sau. Thu gọn rồi vẫn đổi kênh được bằng ⌘1/⌘2/⌘3 hoặc menu Service.
+lần chạy sau. Thu gọn rồi vẫn đổi kênh được bằng ⌘1/⌘2/⌘3/⌘4 hoặc menu Service.
 
 Thiết kế rail xem trước không cần chạy app:
 
@@ -121,10 +122,30 @@ thủ công thay vì gọi code của app:
   `performAsCurrentDrawingAppearance`. Tile cũng chuyển sang màu **đục** — alpha phủ nền
   không biết trước làm light mode nhạt toẹt và tile inactive nổi hơn active.
 
-**Threads là FEED, không phải chat.** `threads.com/direct` và `/direct/inbox` đều redirect
-về feed → web Threads không có surface DM (đã kiểm chứng). Giữ trong danh sách vì có thể
-bạn vẫn muốn đọc feed, nhưng nó không có `hideRules` vì không có "chat" nào để tách khỏi
-chrome.
+**Threads là kênh feed + DM, không ẩn gì.** Web Threads CÓ DM, ở `/messages/` — không phải
+`/direct/` (`/direct` và `/direct/inbox` redirect về feed, nên tôi từng kết luận sai là
+"Threads không có DM"). Kênh này mở thẳng feed `threads.com/` và **cố tình để
+`hideRules` rỗng**: nav của Threads là đường duy nhất đi giữa feed và hộp tin nhắn, ẩn
+logo/search/activity là khoá luôn đường về feed. Surface cũng là **cả domain** chứ không
+chỉ `/messages` — giới hạn path làm mọi bài viết trong feed bật ra browser.
+
+**Zalo là service đầu tiên ngoài Meta.** Đo bằng probe Electron (2026-08-04):
+
+| Câu hỏi | Kết quả đo |
+| --- | --- |
+| Zalo Web có chạy trong app không | Có. `chat.zalo.me` → `id.zalo.me/account?continue=…`, QR render bình thường |
+| Có bị chặn "trình duyệt không hỗ trợ" | Không. UA của app đã bỏ token `Electron/` nên trông như Chrome |
+| Host phải cho load | `zalo.me` (chat + id) và CDN `zdn.vn`, `zadn.vn` — thiếu thì captcha và avatar mất |
+| `document.title` khi chưa login | `Zalo - Đăng nhập Zalo`, sau redirect là `Đăng nhập tài khoản Zalo` |
+
+**Chưa kiểm chứng — cần tài khoản đã login:** Zalo có ghi số chưa đọc vào `document.title`
+kiểu `(3) …` hay không. Badge unread đọc từ đó (`unreadFromTitle`), nên nếu Zalo không ghi
+thì tile Zalo trên rail sẽ **không bao giờ có số** dù có tin mới, và phải đọc số bằng cách
+khác (soi DOM riêng cho Zalo — không còn là "khai báo thêm một service" nữa).
+
+Đăng nhập Zalo là **quét QR bằng app trên điện thoại**, không phải mật khẩu.
+`surface` chỉ gồm `chat.zalo.me` + `id.zalo.me`: `zalo.me/<user>` là profile công khai,
+giữ trong app là lặp lại đúng bug link `facebook.com` từng làm app kẹt.
 
 Rule ẩn chrome nằm ở `Service.hideRules` (`Sources/Messenger/Services.swift`), riêng từng
 service vì DOM hai site khác nhau hoàn toàn:

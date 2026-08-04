@@ -17,7 +17,12 @@ Nên topology không phải chuyện thẩm mỹ mà là chuyện memory.
 | --- | --- | --- |
 | Messenger | `facebook.com/messages` | Xem `2026-07-28-facebook-com-surface.md` |
 | Instagram | `instagram.com/direct` | |
-| Threads | `threads.com/messages` | **Không phải `/direct`** |
+| Threads | `threads.com` (cả domain) | DM ở `/messages`, **không phải `/direct`** |
+
+> **Cập nhật 2026-08-04:** Threads đổi thành kênh **feed + DM** theo yêu cầu user. Surface
+> mở ra cả domain (feed có link bài viết/profile, giới hạn `/messages` làm chúng bật ra
+> browser) và `hideRules` bỏ hết (nav của Threads là đường duy nhất đi giữa feed và DM).
+> Phép đo throttle ở mục dưới vì thế không còn rule nào của Threads để đếm.
 
 Threads từng bị tôi **loại khỏi danh sách** với lý do "web Threads không có DM" — dựa trên
 việc `/direct` và `/direct/inbox` redirect về feed. Kết luận đó sai: DM của Threads ở

@@ -53,20 +53,36 @@ const SERVICES = [
   {
     id: 'threads',
     title: 'Threads',
-    // DM của Threads ở /messages/, KHÔNG phải /direct/ — suy diễn theo Instagram là sai.
-    url: 'https://www.threads.com/messages/',
+    // Mở feed. DM vẫn tới được bằng nav của Threads (/messages/, KHÔNG phải /direct/).
+    url: 'https://www.threads.com/',
     tint: '#57575f',
+    // Cả domain, KHÔNG chỉ /messages: xem feed thì bài viết/profile/search phải ở lại
+    // trong app, giới hạn /messages làm mọi bài bật ra browser.
     surface: [
-      { host: 'threads.com', pathPrefix: '/messages' },
-      { host: 'threads.net', pathPrefix: '/messages' },
+      { host: 'threads.com' },
+      { host: 'threads.net' },
     ],
-    hideRules: [
-      ['logo', 'a[href="/"]'],
-      ['search', 'a[href="/search"]'],
-      ['activity', 'a[href="/activity"]'],
-      ['insights', 'a[href^="/insights/"]'],
-      ['saved', 'a[href^="/saved/"]'],
+    // Cố tình rỗng — nav của Threads là đường duy nhất đi giữa feed và DM.
+    hideRules: [],
+  },
+  {
+    id: 'zalo',
+    title: 'Zalo',
+    // Đo được (probe 2026-08-04): chat.zalo.me redirect sang
+    // id.zalo.me/account?continue=... khi chưa login, QR render bình thường, KHÔNG có màn
+    // "trình duyệt không hỗ trợ" — UA của app đã bỏ token Electron nên trông như Chrome.
+    url: 'https://chat.zalo.me/',
+    tint: '#0068ff',
+    // Cả hai host đều là surface: chat là nơi chat, id là màn login. Thiếu id.zalo.me thì
+    // link trên trang login (đổi ngôn ngữ) bị đẩy ra browser giữa luồng đăng nhập.
+    // KHÔNG mở cả zalo.me: profile/bài viết công khai nằm ở đó, giữ trong app là lặp lại
+    // đúng cái bug link facebook.com từng gây ra.
+    surface: [
+      { host: 'chat.zalo.me' },
+      { host: 'id.zalo.me' },
     ],
+    // Zalo Web chỉ có chat, không có feed/marketplace để tách khỏi chrome.
+    hideRules: [],
   },
 ]
 
@@ -75,6 +91,9 @@ const INTERNAL_HOSTS = [
   'messenger.com', 'facebook.com', 'fbcdn.net', 'fb.com', 'm.me',
   'instagram.com', 'cdninstagram.com',
   'threads.com', 'threads.net',
+  // Zalo: login đi chat.zalo.me → id.zalo.me. `zdn.vn`/`zadn.vn` là CDN (static, avatar,
+  // captcha) — đo bằng probe, thiếu chúng thì captcha và avatar không load.
+  'zalo.me', 'zdn.vn', 'zadn.vn',
 ]
 
 function hostMatches (host, domain) {

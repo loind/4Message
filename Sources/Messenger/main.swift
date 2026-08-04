@@ -13,6 +13,9 @@ let internalHosts = [
     "messenger.com", "facebook.com", "fbcdn.net", "fb.com", "m.me",
     "instagram.com", "cdninstagram.com",
     "threads.com", "threads.net",
+    // Zalo: login đi chat.zalo.me → id.zalo.me. `zdn.vn`/`zadn.vn` là CDN (static, avatar,
+    // captcha) — đo bằng probe, thiếu chúng thì captcha và avatar không load.
+    "zalo.me", "zdn.vn", "zadn.vn",
 ]
 
 /// Dùng surface Messenger trong facebook.com, không dùng messenger.com.
@@ -418,7 +421,7 @@ func runSelftest() {
     check(!isInternal(URL(string: "mailto:a@b.c")!), "scheme không có host")
 
     // Link click: chỉ surface Messenger được ở lại trong app.
-    let msg = knownServices[0], ig = knownServices[1], th = knownServices[2]
+    let msg = knownServices[0], ig = knownServices[1], th = knownServices[2], za = knownServices[3]
     check(isSurface(URL(string: "https://www.facebook.com/messages/")!, of: msg), "fb /messages/")
     check(isSurface(URL(string: "https://www.facebook.com/messages")!, of: msg), "fb /messages")
     check(isSurface(URL(string: "https://www.facebook.com/messages/e2ee/t/1")!, of: msg), "fb thread")
@@ -437,11 +440,29 @@ func runSelftest() {
     check(!isSurface(URL(string: "https://www.instagram.com/explore/")!, of: ig), "ig explore → browser")
     check(!isSurface(URL(string: "https://www.instagram.com/direct/")!, of: msg), "ig không thuộc messenger")
     check(!isSurface(URL(string: "https://www.facebook.com/messages/")!, of: ig), "fb không thuộc instagram")
-    // Threads DM ở /messages/ (KHÔNG phải /direct/ — suy diễn theo Instagram là sai).
+    // Threads là kênh feed + DM: cả domain ở lại trong app. DM ở /messages/ (KHÔNG phải
+    // /direct/ — suy diễn theo Instagram là sai).
+    check(th.url.path == "/", "threads mở feed, không mở thẳng hộp thư")
+    check(isSurface(URL(string: "https://www.threads.com/")!, of: th), "threads feed")
     check(isSurface(URL(string: "https://www.threads.com/messages/")!, of: th), "threads /messages/")
     check(isSurface(URL(string: "https://www.threads.net/messages/x")!, of: th), "threads.net cũng nhận")
-    check(!isSurface(URL(string: "https://www.threads.com/@x")!, of: th), "profile threads → browser")
-    check(!isSurface(URL(string: "https://www.threads.com/search")!, of: th), "search threads → browser")
+    // Ba case dưới trước đây bị đẩy ra browser — xem feed thì phải ở lại trong app.
+    check(isSurface(URL(string: "https://www.threads.com/@x")!, of: th), "profile threads ở lại app")
+    check(isSurface(URL(string: "https://www.threads.com/@x/post/1")!, of: th), "bài viết ở lại app")
+    check(isSurface(URL(string: "https://www.threads.com/search")!, of: th), "search threads ở lại app")
+    check(!isSurface(URL(string: "https://evil-threads.com/")!, of: th), "host giả mạo threads")
+    check(th.hideRules.isEmpty, "threads không ẩn nav — đó là đường về feed")
+    // Zalo: service đầu tiên ngoài Meta. Login đi qua id.zalo.me nên host đó phải là
+    // surface, còn zalo.me (profile, bài viết công khai) thì không.
+    check(isSurface(URL(string: "https://chat.zalo.me/")!, of: za), "zalo chat")
+    check(isSurface(URL(string: "https://id.zalo.me/account?continue=x")!, of: za), "zalo login")
+    check(!isSurface(URL(string: "https://zalo.me/abc")!, of: za), "profile zalo → browser")
+    check(!isSurface(URL(string: "https://chat.zalo.me.evil.com/")!, of: za), "host giả mạo zalo")
+    check(!isSurface(URL(string: "https://chat.zalo.me/")!, of: msg), "zalo không thuộc messenger")
+    check(isInternal(URL(string: "https://stc-chat.zdn.vn/x.js")!), "CDN zdn.vn load được")
+    check(isInternal(URL(string: "https://s120-ava-talk.zadn.vn/a.jpg")!), "CDN zadn.vn load được")
+    check(!isInternal(URL(string: "https://notzalo.me/")!), "notzalo.me không phải zalo.me")
+    check(resolveServices("zalo").map(\.id) == ["zalo"], "zalo là service hợp lệ")
     check(!isSurface(URL(string: "https://www.threads.com/@x")!, of: ig), "threads không thuộc instagram")
     check(knownServices.allSatisfy { !$0.symbol.isEmpty }, "mọi service phải có SF Symbol")
 

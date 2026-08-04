@@ -82,20 +82,36 @@ let knownServices: [Service] = [
             tint: NSColor(srgbRed: 0.91, green: 0.25, blue: 0.55, alpha: 1)),
     Service(id: "threads",
             title: "Threads",
-            url: URL(string: "https://www.threads.com/messages/")!,
-            surface: [SurfaceRule("threads.com", "/messages"),
-                      SurfaceRule("threads.net", "/messages")],
-            // Nhận theo href như Instagram: độc lập ngôn ngữ và tài khoản.
-            // Giữ /messages/ và link profile (path chứa username).
-            hideRules: [
-                HideRule("logo", #"a[href="/"]"#),
-                HideRule("search", #"a[href="/search"]"#),
-                HideRule("activity", #"a[href="/activity"]"#),
-                HideRule("insights", #"a[href^="/insights/"]"#),
-                HideRule("saved", #"a[href^="/saved/"]"#),
-            ],
+            url: URL(string: "https://www.threads.com/")!,
+            // Cả domain, KHÔNG chỉ /messages: kênh này xem feed nên bài viết, profile,
+            // search đều phải ở lại trong app. Giới hạn /messages làm mọi bài trong feed
+            // bật ra Safari.
+            surface: [SurfaceRule("threads.com"),
+                      SurfaceRule("threads.net")],
+            // Cố tình rỗng. Nav của Threads là đường DUY NHẤT đi giữa feed và DM
+            // (app không có tab riêng cho hai chỗ đó) — ẩn logo/search/activity là khoá
+            // luôn đường về feed sau khi vào tin nhắn.
+            hideRules: [],
             symbol: "at",
             tint: NSColor(srgbRed: 0.34, green: 0.34, blue: 0.38, alpha: 1)),
+    // Zalo KHÔNG phải của Meta — service đầu tiên như vậy. Đo bằng probe (2026-08-04):
+    // chat.zalo.me redirect sang id.zalo.me/account?continue=… khi chưa login, QR render
+    // bình thường, không có màn "trình duyệt không hỗ trợ".
+    // CHƯA kiểm chứng được (cần tài khoản đã login): Zalo có ghi số chưa đọc vào
+    // `document.title` kiểu `(3) …` hay không. Nếu không thì badge rail của Zalo luôn rỗng
+    // và phải đọc số bằng cách khác — xem README.
+    Service(id: "zalo",
+            title: "Zalo",
+            url: URL(string: "https://chat.zalo.me/")!,
+            // Cả chat và id: id.zalo.me là màn login, thiếu nó thì link trên trang login bị
+            // đẩy ra browser giữa luồng đăng nhập. KHÔNG mở cả zalo.me — profile và bài
+            // viết công khai nằm ở đó, giữ trong app là lặp lại bug link facebook.com.
+            surface: [SurfaceRule("chat.zalo.me"),
+                      SurfaceRule("id.zalo.me")],
+            // Zalo Web chỉ có chat, không có feed để tách khỏi chrome.
+            hideRules: [],
+            symbol: "bubble.left.and.bubble.right.fill",
+            tint: NSColor(srgbRed: 0.0, green: 0.41, blue: 1.0, alpha: 1)),
 ]
 
 /// Cấu hình bằng `FBMESS_SERVICES=messenger,instagram`. Mặc định chỉ messenger để
