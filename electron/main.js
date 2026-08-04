@@ -35,6 +35,26 @@ function probeExit () {
   app.exit(probeFailed ? 1 : 0)
 }
 
+/**
+ * Chạy một probe mode. MỌI probe phải đi qua đây, không tự gọi setTimeout.
+ *
+ * `finally` là phần quan trọng: throw trong async callback thành unhandled rejection,
+ * probeExit() không bao giờ chạy, và process TREO vô hạn — phải kill -9. Test harness treo
+ * tệ hơn test fail: CI đứng mãi mà không ai biết vì sao. Đã gặp thật khi activeId chưa tồn tại.
+ */
+function runProbe (delayMs, body) {
+  setTimeout(async () => {
+    try {
+      await body()
+    } catch (e) {
+      probeFailed++
+      console.log(`FAIL probe throw: ${(e && e.stack) || e}`)
+    } finally {
+      probeExit()
+    }
+  }, delayMs)
+}
+
 let win = null
 let railView = null
 let tray = null
@@ -287,7 +307,7 @@ app.whenReady().then(() => {
 
   // Kiểm tra wiring không cần nhìn màn hình: `electron . --probe`. Cần cho máy build không
   // có GUI session — screencapture ở đây chỉ ra desktop trống nên không soi bằng mắt được.
-  if (probe) setTimeout(async () => {
+  if (probe) runProbe(25000, async () => {
     const tiles = railView
       ? await railView.webContents.executeJavaScript('document.querySelectorAll(".tile").length')
       : 0
@@ -321,8 +341,7 @@ app.whenReady().then(() => {
     console.log(`link ngoài  → openExternal: ${afterExternal > before ? 'CÓ (đúng)' : 'KHÔNG (SAI)'}`)
     console.log(`link surface → openExternal: ${afterSurface > afterExternal ? 'CÓ (SAI)' : 'KHÔNG (đúng)'}`)
 
-    probeExit()
-  }, 25000)
+  })
 })
 
 app.on('before-quit', () => { app.isQuitting = true })
