@@ -61,4 +61,30 @@ for (const s of SERVICES) {
   assert.ok(rail.includes(`${s.id}: '`), `thiếu glyph rail cho service: ${s.id}`)
 }
 
+const { resolveEnabled, railVisible } = require('./services')
+
+const ALL = SERVICES
+const ids = (list) => list.map(s => s.id)
+
+// Thứ tự rail phải canonical, KHÔNG theo thứ tự người dùng bấm bật.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: ['zalo', 'messenger'] })), ['messenger', 'zalo'])
+// Không bao giờ 0 kênh — cửa sổ rỗng là trạng thái không có đường thoát bằng chuột.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: [] })), ids(ALL))
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: ['nope'] })), ids(ALL))
+assert.deepStrictEqual(ids(resolveEnabled(ALL, {})), ids(ALL))
+// prefs.json là file người dùng sửa được bằng tay → kiểu sai phải không làm sập.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: 'messenger' })), ids(ALL))
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: [null, 3] })), ids(ALL))
+// Id ngoài vũ trụ FBMESS_SERVICES bị bỏ.
+const TWO = resolveServices('messenger,instagram')
+assert.deepStrictEqual(ids(resolveEnabled(TWO, { enabled: ['zalo'] })), ids(TWO))
+assert.deepStrictEqual(ids(resolveEnabled(TWO, { enabled: ['instagram'] })), ['instagram'])
+// Trùng lặp không sinh tile trùng.
+assert.deepStrictEqual(ids(resolveEnabled(ALL, { enabled: ['zalo', 'zalo'] })), ['zalo'])
+
+assert.strictEqual(railVisible(1, false), false)
+assert.strictEqual(railVisible(2, false), true)
+assert.strictEqual(railVisible(2, true), false)
+assert.strictEqual(railVisible(1, true), false)
+
 console.log(`selftest OK (${SERVICES.length} services)`)

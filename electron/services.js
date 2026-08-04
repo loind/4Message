@@ -155,4 +155,25 @@ function unreadFromTitle (title) {
   return inner
 }
 
-module.exports = { SERVICES, INTERNAL_HOSTS, isInternal, isSurface, resolveServices, unreadFromTitle }
+/**
+ * Kênh nào đang bật. `universe` là danh sách khả dụng (từ FBMESS_SERVICES); prefs chỉ
+ * bật/tắt TRONG đó.
+ *
+ * Không bao giờ trả rỗng: cửa sổ 0 kênh không có đường thoát bằng chuột, mà prefs.json là
+ * file người dùng sửa được bằng tay nên phải chịu được nội dung rác.
+ */
+function resolveEnabled (universe, prefs) {
+  const want = prefs && Array.isArray(prefs.enabled) ? prefs.enabled : null
+  if (!want) return universe.slice()
+  const set = new Set(want.filter(x => typeof x === 'string'))
+  // Lọc theo `universe` nên thứ tự canonical và tính duy nhất đều có sẵn.
+  const picked = universe.filter(s => set.has(s.id))
+  return picked.length ? picked : universe.slice()
+}
+
+/** Rail chỉ có nghĩa khi có nhiều hơn một kênh để chọn. */
+function railVisible (enabledCount, collapsed) {
+  return enabledCount > 1 && !collapsed
+}
+
+module.exports = { SERVICES, INTERNAL_HOSTS, isInternal, isSurface, resolveServices, unreadFromTitle, resolveEnabled, railVisible }
