@@ -548,6 +548,15 @@ app.whenReady().then(() => {
 
     persist()
   })
+
+  if (process.argv.includes('--probe-prefs')) runProbe(15000, () => {
+    // Kỳ vọng đọc từ prefs.json mà --probe-toggle vừa ghi, KHÔNG hardcode: test này chứng
+    // minh loadPrefs được nối vào createWindow, nên phải so với file trên đĩa.
+    const saved = loadPrefs(app.getPath('userData'))
+    check('kênh bật khớp prefs.json', enabledIds(), saved.enabled)
+    check('railCollapsed khớp prefs.json', railCollapsed, saved.railCollapsed)
+    check('không dùng cả vũ trụ', enabledIds().length < services.length, true)
+  })
 })
 
 app.on('before-quit', () => { app.isQuitting = true })
