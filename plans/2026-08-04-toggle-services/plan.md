@@ -265,6 +265,26 @@ function probeExit () {
   app.isQuitting = true
   app.exit(probeFailed ? 1 : 0)
 }
+
+/**
+ * Chạy một probe mode. MỌI probe phải đi qua đây, không tự gọi setTimeout.
+ *
+ * `finally` là phần quan trọng: throw trong async callback thành unhandled rejection,
+ * probeExit() không bao giờ chạy, và process TREO vô hạn — phải kill -9. Test harness treo
+ * tệ hơn test fail: CI đứng mãi mà không ai biết vì sao. Đã gặp thật khi activeId chưa tồn tại.
+ */
+function runProbe (delayMs, body) {
+  setTimeout(async () => {
+    try {
+      await body()
+    } catch (e) {
+      probeFailed++
+      console.log(`FAIL probe throw: ${(e && e.stack) || e}`)
+    } finally {
+      probeExit()
+    }
+  }, delayMs)
+}
 ```
 
 Sửa khối probe (`:264-266`) — thay `console.log` bằng assert thật:
@@ -274,18 +294,33 @@ Sửa khối probe (`:264-266`) — thay `console.log` bằng assert thật:
     check('activeId', activeId, services[0].id)
 ```
 
-Và thay cuối khối `--probe`:
+Và chuyển khối `--probe` sang `runProbe`. Thay dòng mở:
 
 ```js
-    app.isQuitting = true
-    app.quit()
+  if (probe) setTimeout(async () => {
 ```
 
 bằng:
 
 ```js
-    probeExit()
+  if (probe) runProbe(25000, async () => {
 ```
+
+rồi thay cuối khối:
+
+```js
+    app.isQuitting = true
+    app.quit()
+  }, 25000)
+```
+
+bằng:
+
+```js
+  })
+```
+
+`probeExit()` KHÔNG gọi trong thân — `runProbe` gọi nó trong `finally`.
 
 - [ ] **Step 2: Chạy để chắc là nó fail**
 
@@ -430,7 +465,7 @@ Process chết là RAM đã trả về OS — không phải suy đoán như đo 
 chậm và từng làm số liệu bản WKWebView vô nghĩa.
 
 ```js
-  if (process.argv.includes('--probe-toggle')) setTimeout(async () => {
+  if (process.argv.includes('--probe-toggle')) runProbe(20000, async () => {
     const pids = new Map(runtimes.map(r => [r.service.id, r.view.webContents.getOSProcessId()]))
     console.log(`bật ${runtimes.length} kênh: ${[...pids.entries()].map(([k, v]) => k + '=' + v).join(' ')}`)
 
@@ -464,9 +499,11 @@ chậm và từng làm số liệu bản WKWebView vô nghĩa.
       [services[0].id, services[1].id, services[3].id])
 
     persist()
-    probeExit()
-  }, 20000)
+  })
 ```
+
+`probeExit()` KHÔNG gọi trong thân — `runProbe` gọi nó trong `finally`, nên throw bất ngờ
+cũng thành `FAIL probe throw` + exit 1 chứ không treo.
 
 - [ ] **Step 2: Chạy để chắc là nó fail**
 
@@ -597,7 +634,7 @@ git commit -m "feat(electron): bật/tắt kênh lúc chạy, tắt là hủy vi
 
 - [ ] **Step 1: Viết test fail trước**
 
-Thêm vào cuối khối `--probe-toggle` (Task 4), TRƯỚC `app.isQuitting = true`:
+Thêm vào cuối thân `runProbe` của `--probe-toggle` (Task 4), TRƯỚC dòng `persist()`:
 
 ```js
     // ⌘0 phải độc lập với quy tắc "còn 1 kênh": 3 kênh bật mà ẩn tay thì rail vẫn phải ẩn.
@@ -741,15 +778,14 @@ git commit -m "feat(electron): menu Kênh bật/tắt và Cmd+0 ẩn cột kênh
 Thêm mode đọc trạng thái đã lưu, sau khối `--probe-toggle`:
 
 ```js
-  if (process.argv.includes('--probe-prefs')) setTimeout(() => {
+  if (process.argv.includes('--probe-prefs')) runProbe(15000, () => {
     // Kỳ vọng đọc từ prefs.json mà --probe-toggle vừa ghi, KHÔNG hardcode: test này chứng
     // minh loadPrefs được nối vào createWindow, nên phải so với file trên đĩa.
     const saved = loadPrefs(app.getPath('userData'))
     check('kênh bật khớp prefs.json', enabledIds(), saved.enabled)
     check('railCollapsed khớp prefs.json', railCollapsed, saved.railCollapsed)
     check('không dùng cả vũ trụ', enabledIds().length < services.length, true)
-    probeExit()
-  }, 15000)
+  })
 ```
 
 - [ ] **Step 2: Chạy để chắc là nó fail**
