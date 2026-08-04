@@ -36,6 +36,11 @@ if (probe || probeToggle || process.argv.includes('--probe-prefs')) {
   //
   // --probe-prefs KHÔNG được liệt ở đây: mode đó tồn tại để ĐỌC LẠI đúng cái đang có trên đĩa
   // (do --probe-toggle vừa ghi) — reset ở đây sẽ xoá luôn assertion duy nhất mà nó có.
+  //
+  // Hệ quả: thứ tự chạy 3 mode (3 lần gọi process riêng) BẮT BUỘC là --probe → --probe-toggle
+  // → --probe-prefs, liên tiếp. Chèn --probe vào giữa --probe-toggle và --probe-prefs sẽ reset
+  // lại prefs.json (về full universe, railCollapsed=false) khiến --probe-prefs fail oan 2 assert
+  // 'kênh bật khớp prefs.json' và 'không dùng cả vũ trụ' — đọc y hệt một lỗi persistence thật.
   if (probe || probeToggle) {
     // Máy sạch chưa từng chạy probe thì probeDir chưa tồn tại — savePrefs ghi file tạm bên
     // trong đó nên cần thư mục có sẵn trước, không thì ENOENT văng ra TRƯỚC cả runProbe (ở
