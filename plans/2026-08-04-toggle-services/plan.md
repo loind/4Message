@@ -244,18 +244,53 @@ refactor, không lẫn với tính năng mới.
 
 - [ ] **Step 1: Viết test fail trước**
 
-`--probe` là test cho tầng runtime. Sửa `electron/main.js` khối probe (`:264-266`) để in
-thêm `activeId`, đây là thứ test sẽ kiểm:
+`--probe` là test cho tầng runtime, nhưng hiện nó chỉ IN ra để người đọc tự so. Test không
+assert thì không fail được — thêm helper assert dùng chung cho mọi probe mode.
+
+Thêm vào `electron/main.js` ngay sau `const probeOpened = []`:
 
 ```js
-    console.log(`rail tiles: ${tiles} (kỳ vọng ${services.length})`)
-    console.log(`activeId: ${activeId} (kỳ vọng ${services[0].id})`)
+let probeFailed = 0
+
+/** Assert cho probe mode: in PASS/FAIL và đếm, để process exit code phản ánh kết quả. */
+function check (label, actual, expected) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected)
+  if (!ok) probeFailed++
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${label}: ${JSON.stringify(actual)}${ok ? '' : ' — kỳ vọng ' + JSON.stringify(expected)}`)
+}
+
+/** Thoát với code khác 0 khi có assert fail — không thì CI coi như pass. */
+function probeExit () {
+  console.log(probeFailed ? `${probeFailed} assert FAIL` : 'tất cả assert PASS')
+  app.isQuitting = true
+  app.exit(probeFailed ? 1 : 0)
+}
+```
+
+Sửa khối probe (`:264-266`) — thay `console.log` bằng assert thật:
+
+```js
+    check('rail tiles', tiles, services.length)
+    check('activeId', activeId, services[0].id)
+```
+
+Và thay cuối khối `--probe`:
+
+```js
+    app.isQuitting = true
+    app.quit()
+```
+
+bằng:
+
+```js
+    probeExit()
 ```
 
 - [ ] **Step 2: Chạy để chắc là nó fail**
 
-Run: `cd electron && ./node_modules/.bin/electron . --probe 2>&1 | grep activeId`
-Expected: FAIL — in `activeId: undefined (kỳ vọng messenger)` vì `activeId` chưa tồn tại
+Run: `cd electron && ./node_modules/.bin/electron . --probe 2>&1 | grep -E "^(PASS|FAIL)"; echo "exit=$?"`
+Expected: FAIL — `FAIL activeId: null — kỳ vọng "messenger"` vì `activeId` chưa được gán
 
 - [ ] **Step 3: Implement tối thiểu**
 
@@ -358,8 +393,12 @@ bằng:
 
 - [ ] **Step 4: Chạy để chắc là nó pass**
 
-Run: `node electron/selftest.js && cd electron && ./node_modules/.bin/electron . --probe 2>&1 | grep -E "activeId|rail tiles|link"`
-Expected: PASS — `activeId: messenger (kỳ vọng messenger)`, `rail tiles: 4 (kỳ vọng 4)`, cả hai case link đúng
+```bash
+node electron/selftest.js
+cd electron && ./node_modules/.bin/electron . --probe > /tmp/probe.log 2>&1; echo "exit=$?"
+grep -E "^(PASS|FAIL)|assert" /tmp/probe.log
+```
+Expected: `exit=0` và `tất cả assert PASS`. **Exit code là cổng** — grep chỉ để đọc.
 
 - [ ] **Step 5: Commit**
 
@@ -397,35 +436,42 @@ chậm và từng làm số liệu bản WKWebView vô nghĩa.
 
     const keep = runtimes[0].service.id
     for (const id of [...pids.keys()].filter(x => x !== keep)) setEnabled(id, false)
+    // Process chết không đồng bộ với close() — chờ rồi mới kiểm liveness.
     await new Promise(r => setTimeout(r, 3000))
 
+    check('còn bật', runtimes.length, 1)
+    check('activeId sau khi tắt kênh đang xem', activeId, keep)
+
+    // Điều kiện MẠNH NHẤT của thiết kế: process renderer của kênh tắt phải CHẾT.
+    // Process chết là RAM đã trả về OS — khác với đo footprint, nơi bmalloc trả page chậm
+    // và từng làm số liệu bản WKWebView vô nghĩa.
     const alive = (pid) => { try { process.kill(pid, 0); return true } catch { return false } }
-    const leaked = [...pids.entries()].filter(([id, pid]) => id !== keep && alive(pid))
-    console.log(`còn bật: ${runtimes.length} (kỳ vọng 1)`)
-    console.log(`activeId: ${activeId} (kỳ vọng ${keep})`)
-    console.log(`process chưa chết: ${leaked.length ? leaked.map(([id]) => id).join(',') : 'không (đúng)'}`)
-    console.log(`rail hiện: ${railVisible(runtimes.length, railCollapsed)} (kỳ vọng false)`)
+    const leaked = [...pids.entries()].filter(([id, pid]) => id !== keep && alive(pid)).map(([id]) => id)
+    check('process kênh đã tắt còn sống', leaked, [])
+
+    check('rail hiện khi còn 1 kênh', railVisible(runtimes.length, railCollapsed), false)
 
     // Tắt kênh cuối cùng phải là no-op: cửa sổ rỗng không có đường thoát bằng chuột.
     setEnabled(keep, false)
-    console.log(`sau khi thử tắt kênh cuối: ${runtimes.length} (kỳ vọng 1)`)
+    check('còn bật sau khi thử tắt kênh cuối', runtimes.length, 1)
 
-    // Bật lại một kênh phải vào đúng vị trí canonical, không phải cuối mảng.
-    // Dùng services[1] rồi services[3] để chứng minh chèn giữa, không chỉ chèn cuối.
+    // Bật lại phải vào đúng vị trí canonical. Bật services[3] TRƯỚC services[1] để chứng
+    // minh chèn giữa — nếu chỉ append thì thứ tự sẽ là [0],[3],[1] và assert này fail.
     setEnabled(services[3].id, true)
     setEnabled(services[1].id, true)
-    console.log(`thứ tự sau khi bật ${services[3].id} rồi ${services[1].id}: ${runtimes.map(r => r.service.id).join(',')} (kỳ vọng ${[services[0], services[1], services[3]].map(s => s.id).join(',')})`)
+    check('thứ tự canonical sau khi bật lại',
+      runtimes.map(r => r.service.id),
+      [services[0].id, services[1].id, services[3].id])
 
     persist()
-    app.isQuitting = true
-    app.quit()
+    probeExit()
   }, 20000)
 ```
 
 - [ ] **Step 2: Chạy để chắc là nó fail**
 
-Run: `cd electron && ./node_modules/.bin/electron . --probe-toggle 2>&1 | grep -E "bật|còn|process|rail hiện|sau khi"`
-Expected: FAIL — `ReferenceError: setEnabled is not defined`
+Run: `cd electron && ./node_modules/.bin/electron . --probe-toggle > /tmp/pt.log 2>&1; echo "exit=$?"; grep -E "^(PASS|FAIL)|assert" /tmp/pt.log`
+Expected: FAIL — `ReferenceError: setEnabled is not defined`, `exit` khác 0
 
 - [ ] **Step 3: Implement tối thiểu**
 
@@ -519,12 +565,17 @@ bằng:
 
 - [ ] **Step 4: Chạy để chắc là nó pass**
 
-Run: `node electron/selftest.js && cd electron && ./node_modules/.bin/electron . --probe-toggle 2>&1 | grep -E "bật |còn bật|process chưa|rail hiện|sau khi"`
-Expected: PASS — `còn bật: 1 (kỳ vọng 1)`, `process chưa chết: không (đúng)`, `rail hiện: false (kỳ vọng false)`, `sau khi thử tắt kênh cuối: 1 (kỳ vọng 1)`, và dòng thứ tự in đúng ba id theo thứ tự canonical (kênh bật sau nhưng rank nhỏ hơn phải nằm TRƯỚC)
+```bash
+node electron/selftest.js
+cd electron && ./node_modules/.bin/electron . --probe-toggle > /tmp/pt.log 2>&1; echo "exit=$?"
+grep -E "^(PASS|FAIL)|assert" /tmp/pt.log
+```
+Expected: `exit=0`, `tất cả assert PASS` — cả 6 assert PASS. **Exit code là cổng.**
 
-Nếu `process chưa chết` liệt kê id nào → `webContents.close()` không hủy process. Thử
-`rt.view.webContents.destroy()`. Nếu vẫn không chết thì **giả định cốt lõi của thiết kế sai**
-— dừng lại, báo, và lùi về phương án "chỉ ẩn tile" trong `design.md`.
+Nếu `FAIL process kênh đã tắt còn sống` liệt kê id nào → `webContents.close()` không hủy
+process. Thử `rt.view.webContents.destroy()`. Nếu vẫn không chết thì **giả định cốt lõi của
+thiết kế sai** — báo BLOCKED, dừng, và lùi về phương án "chỉ ẩn tile" trong `design.md`.
+Không tự ý đổi thiết kế.
 
 - [ ] **Step 5: Commit**
 
@@ -549,24 +600,29 @@ git commit -m "feat(electron): bật/tắt kênh lúc chạy, tắt là hủy vi
 Thêm vào cuối khối `--probe-toggle` (Task 4), TRƯỚC `app.isQuitting = true`:
 
 ```js
-    // ⌘0 phải độc lập với quy tắc "còn 1 kênh": bật 2 kênh rồi ẩn tay thì rail phải ẩn,
-    // đó là lý do có hai trạng thái tách rời.
+    // ⌘0 phải độc lập với quy tắc "còn 1 kênh": 3 kênh bật mà ẩn tay thì rail vẫn phải ẩn.
+    // Đó là toàn bộ lý do có hai trạng thái tách rời.
     toggleRail()
-    console.log(`ẩn tay: railCollapsed=${railCollapsed} rail hiện=${railVisible(runtimes.length, railCollapsed)} (kỳ vọng true/false)`)
+    check('ẩn tay: railCollapsed', railCollapsed, true)
+    check('ẩn tay: rail hiện', railVisible(runtimes.length, railCollapsed), false)
     toggleRail()
-    console.log(`hiện lại: railCollapsed=${railCollapsed} rail hiện=${railVisible(runtimes.length, railCollapsed)} (kỳ vọng false/true)`)
+    check('hiện lại: railCollapsed', railCollapsed, false)
+    check('hiện lại: rail hiện', railVisible(runtimes.length, railCollapsed), true)
 
-    const menu = Menu.getApplicationMenu()
-    const kenh = menu.items.find(i => i.label === 'Kênh')
-    console.log(`menu Kênh: ${kenh ? kenh.submenu.items.length + ' item' : 'KHÔNG CÓ'}`)
-    const checked = kenh ? kenh.submenu.items.filter(i => i.type === 'checkbox' && i.checked).map(i => i.label) : []
-    console.log(`đang tick: ${checked.join(',')} (kỳ vọng ${runtimes.length} kênh đang bật)`)
+    const kenh = Menu.getApplicationMenu().items.find(i => i.label === 'Kênh')
+    check('có menu Kênh', !!kenh, true)
+    // 4 kênh + separator + ẩn/hiện cột
+    check('số item menu Kênh', kenh.submenu.items.length, services.length + 2)
+    check('kênh đang tick',
+      kenh.submenu.items.filter(i => i.type === 'checkbox' && i.checked).map(i => i.label).sort(),
+      runtimes.map(r => r.service.title).sort())
+    check('nhãn ẩn/hiện cột', kenh.submenu.items[services.length + 1].label, 'Ẩn cột kênh')
 ```
 
 - [ ] **Step 2: Chạy để chắc là nó fail**
 
-Run: `cd electron && ./node_modules/.bin/electron . --probe-toggle 2>&1 | grep -E "ẩn tay|menu Kênh"`
-Expected: FAIL — `ReferenceError: toggleRail is not defined`
+Run: `cd electron && ./node_modules/.bin/electron . --probe-toggle > /tmp/pt.log 2>&1; echo "exit=$?"; grep -E "^(PASS|FAIL)" /tmp/pt.log`
+Expected: FAIL — `ReferenceError: toggleRail is not defined`, `exit` khác 0
 
 - [ ] **Step 3: Implement tối thiểu**
 
@@ -656,8 +712,12 @@ bằng:
 
 - [ ] **Step 4: Chạy để chắc là nó pass**
 
-Run: `node electron/selftest.js && cd electron && ./node_modules/.bin/electron . --probe-toggle 2>&1 | grep -E "ẩn tay|hiện lại|menu Kênh|đang tick"`
-Expected: PASS — `ẩn tay: railCollapsed=true rail hiện=false`, `hiện lại: railCollapsed=false rail hiện=true`, `menu Kênh: 6 item` (4 kênh + separator + ẩn/hiện), `đang tick` liệt kê đúng kênh đang bật
+```bash
+node electron/selftest.js
+cd electron && ./node_modules/.bin/electron . --probe-toggle > /tmp/pt.log 2>&1; echo "exit=$?"
+grep -E "^(PASS|FAIL)|assert" /tmp/pt.log
+```
+Expected: `exit=0`, `tất cả assert PASS` — 14 assert PASS (6 của Task 4 + 8 của Task 5)
 
 - [ ] **Step 5: Commit**
 
@@ -682,10 +742,13 @@ Thêm mode đọc trạng thái đã lưu, sau khối `--probe-toggle`:
 
 ```js
   if (process.argv.includes('--probe-prefs')) setTimeout(() => {
-    console.log(`đã bật: ${enabledIds().join(',')}`)
-    console.log(`railCollapsed: ${railCollapsed}`)
-    app.isQuitting = true
-    app.quit()
+    // Kỳ vọng đọc từ prefs.json mà --probe-toggle vừa ghi, KHÔNG hardcode: test này chứng
+    // minh loadPrefs được nối vào createWindow, nên phải so với file trên đĩa.
+    const saved = loadPrefs(app.getPath('userData'))
+    check('kênh bật khớp prefs.json', enabledIds(), saved.enabled)
+    check('railCollapsed khớp prefs.json', railCollapsed, saved.railCollapsed)
+    check('không dùng cả vũ trụ', enabledIds().length < services.length, true)
+    probeExit()
   }, 15000)
 ```
 
@@ -695,10 +758,11 @@ Xoá trạng thái rồi chạy ngay `--probe-prefs`, chưa qua `--probe-toggle`
 
 ```bash
 rm -f "$HOME/Library/Application Support/FBMessElectron/prefs.json"
-cd electron && ./node_modules/.bin/electron . --probe-prefs 2>&1 | grep -E "đã bật|railCollapsed"
+cd electron && ./node_modules/.bin/electron . --probe-prefs > /tmp/pp.log 2>&1; echo "exit=$?"
+grep -E "^(PASS|FAIL)" /tmp/pp.log
 ```
-Expected: FAIL — `ReferenceError: enabledIds is not defined` nếu chạy trước Task 4; nếu Task 4
-đã xong thì in cả 4 kênh, đúng nhưng chưa chứng minh được gì vì chưa có gì được lưu
+Expected: FAIL — `FAIL không dùng cả vũ trụ`, vì chưa có prefs.json nên app bật cả 4 kênh.
+Đúng như thiết kế, nhưng chưa chứng minh được đường persist.
 
 - [ ] **Step 3: Tạo trạng thái khác mặc định rồi đọc lại**
 
@@ -715,11 +779,12 @@ Expected: `prefs.json` chứa đúng 3 id đó, không phải 4
 - [ ] **Step 4: Chạy để chắc là nó pass**
 
 ```bash
-cd electron && ./node_modules/.bin/electron . --probe-prefs 2>&1 | grep -E "đã bật|railCollapsed"
+cd electron && ./node_modules/.bin/electron . --probe-prefs > /tmp/pp.log 2>&1; echo "exit=$?"
+grep -E "^(PASS|FAIL)|assert" /tmp/pp.log
 ```
-Expected: `đã bật` in đúng 3 kênh mà `--probe-toggle` để lại (KHÔNG phải 4), `railCollapsed: false`.
-Đây là chỗ duy nhất chứng minh `loadPrefs` thật sự được nối vào `createWindow` — nếu quên nối
-thì app vẫn chạy bình thường với đủ 4 kênh và không có lỗi nào nổi lên.
+Expected: `exit=0`, cả 3 assert PASS. Đây là chỗ DUY NHẤT chứng minh `loadPrefs` thật sự được
+nối vào `createWindow` — quên nối thì app vẫn chạy bình thường với đủ 4 kênh, không lỗi nào nổi
+lên, và chỉ assert `không dùng cả vũ trụ` bắt được.
 
 - [ ] **Step 5: Đưa trạng thái về mặc định rồi commit**
 
