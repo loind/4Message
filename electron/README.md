@@ -85,6 +85,11 @@ link policy (link ngoài phải ra browser, link surface phải giữ trong app)
 `preview-rail.js` sinh `/tmp/rail-light.png` + `/tmp/rail-dark.png` từ chính `rail.html`.
 Soi **cả hai** theme: bug rail chỉ hiện ở một theme đã xảy ra rồi (`docs/ui-discipline.md`).
 
+Icon menu bar sinh lại bằng `./node_modules/.bin/electron make-tray-icon.js`. Nó là
+**template image** (đen + alpha) nên macOS tự đảo màu theo menu bar sáng/tối — đặt màu cứng
+là sai ở một trong hai theme. `--probe` in cỡ icon và cờ template để xác nhận nó vào được
+asar; thiếu file thì `createFromPath` trả ảnh rỗng và Tray im lặng hiện trống.
+
 Cả hai công cụ này cần thiết vì máy build không có GUI session — `screencapture` ở đó chỉ ra
 desktop trống, không soi bằng mắt được.
 
@@ -146,6 +151,8 @@ electron/
   service-preload.js  bắt click link, quyết định giữ trong app hay mở browser
   selftest.js         cổng build — logic surface/unread, không cần GUI/mạng
   preview-rail.js     render rail.html ra PNG (light + dark)
+  make-tray-icon.js   sinh tray.png + tray@2x.png (template image cho menu bar)
+  tray.png            icon menu bar 20×20, đen + alpha. tray@2x.png cho Retina
   build-info.json     sinh lúc build, không commit
 ```
 

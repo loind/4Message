@@ -75,7 +75,7 @@ function updateBadge () {
   const total = runtimes.reduce((n, r) => n + (r.unread ? parseInt(r.unread, 10) || 0 : 0), 0)
   if (app.dock) app.dock.setBadge(total > 0 ? String(total) : '')
   // Số cạnh icon menu bar — buildTray chạy sau createWindow nên tray có thể chưa tồn tại.
-  if (tray) tray.setTitle(total > 0 ? `✉ ${total}` : '✉')
+  if (tray) tray.setTitle(total > 0 ? ` ${total}` : '')
   if (win && rt) win.setTitle(rt.service.title + (rt.unread ? `  (${rt.unread})` : ''))
 }
 
@@ -184,9 +184,15 @@ function toggleWindow () {
 }
 
 function buildTray () {
-  // Icon template 1px trong suốt: macOS sẽ hiện chữ title cạnh nó.
-  tray = new Tray(nativeImage.createEmpty())
-  tray.setTitle('✉')
+  // `✉` là ký tự text nên menu bar render nó nhỏ và xỉn. Dùng template image thật:
+  // createFromPath tự lấy tray@2x.png cho màn Retina. Sinh lại bằng make-tray-icon.js.
+  const icon = nativeImage.createFromPath(path.join(__dirname, 'tray.png'))
+  icon.setTemplateImage(true)
+  // Thiếu file trong asar thì createFromPath trả về ảnh rỗng, Tray im lặng hiện trống —
+  // kiểu lỗi chỉ thấy ở bản đã package, không thấy khi chạy từ source.
+  if (icon.isEmpty()) console.warn('CẢNH BÁO tray: tray.png rỗng hoặc thiếu trong bundle')
+  else if (probe) console.log(`tray icon: ${JSON.stringify(icon.getSize())} template=${icon.isTemplateImage()}`)
+  tray = new Tray(icon)
   const rebuild = () => {
     tray.setContextMenu(Menu.buildFromTemplate([
       ...runtimes.map((r, i) => ({
