@@ -95,7 +95,6 @@ function activeIdx () { return runtimes.findIndex(r => r.service.id === activeId
 /** @type {{service: any, view: WebContentsView, unread: string|null}[]} */
 const runtimes = []
 
-let prefs = { enabled: null, railCollapsed: false }
 let railCollapsed = false
 
 function enabledIds () { return runtimes.map(r => r.service.id) }
@@ -147,11 +146,10 @@ function setEnabled (id, on) {
   }
 
   persist()
+  // selectId(activeId) đã tự chạy layout()/pushRailState()/updateBadge() — gọi lại ba hàm đó
+  // ở đây là dư, mỗi lần bật/tắt kênh render rail hai lần cho một lần đổi.
   selectId(activeId)
   buildMenu()
-  layout()
-  pushRailState()
-  updateBadge()
 }
 
 function toggleRail () {
@@ -262,7 +260,9 @@ function makeServiceView (service) {
 
     // Self-check 2 mốc, chỉ cảnh báo ở mốc sau: nav của Threads render trễ nên mốc sớm
     // luôn báo thiếu, mà cảnh báo luôn sai thì người ta quen bỏ qua cảnh báo thật.
-    const check = async (phase) => {
+    // Tên riêng (không phải `check`) — trùng tên với assert của probe là cái bẫy cho lần sửa
+    // sau: shadow biến ngoài closure, lỗi chỉ lộ khi chạy probe chứ không lộ lúc đọc code.
+    const checkChrome = async (phase) => {
       const js = `JSON.stringify(${JSON.stringify(service.hideRules)}.map(([n,s]) => n + '=' + document.querySelectorAll(s).length))`
       try {
         const hits = JSON.parse(await wc.executeJavaScript(js))
@@ -271,8 +271,8 @@ function makeServiceView (service) {
         else if (phase === 'late') console.warn(`[${service.id}] CẢNH BÁO chrome: ${miss.join(',')} không khớp gì`)
       } catch {}
     }
-    setTimeout(() => check('early'), 8000)
-    setTimeout(() => check('late'), 25000)
+    setTimeout(() => checkChrome('early'), 8000)
+    setTimeout(() => checkChrome('late'), 25000)
   })
 
   // Link user click ngoài surface → browser. KHÔNG giữ trong app: link facebook.com trong
@@ -311,7 +311,7 @@ function createWindow () {
     title: 'FB Mess', show: false,
   })
 
-  prefs = loadPrefs(app.getPath('userData'))
+  const prefs = loadPrefs(app.getPath('userData'))
   railCollapsed = prefs.railCollapsed
   // Chỉ dựng view cho kênh đang bật — kênh tắt không tạo view rồi hủy.
   for (const s of resolveEnabled(services, prefs)) {
