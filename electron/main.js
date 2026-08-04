@@ -27,12 +27,16 @@ const probeToggle = process.argv.includes('--probe-toggle')
 if (probe || probeToggle || process.argv.includes('--probe-prefs')) {
   const probeDir = path.join(app.getPath('temp'), 'fbmess-probe')
   app.setPath('userData', probeDir)
-  // --probe-toggle giả định xuất phát từ ĐỦ cả vũ trụ hiện tại (assert "đủ kênh để test" bên
-  // dưới) — prefs.json rớt lại từ lần probe trước sẽ thu hẹp vũ trụ đó, làm lần chạy sau fail
-  // oan chứ không phải vì bug thật. Chỉ reset phần TRONG vũ trụ hiện tại, giữ nguyên id
-  // NGOÀI vũ trụ (cùng logic merge của persist()) — không thì test merge ở Finding 3 tự phá
-  // chính dữ liệu nó cần kiểm tra.
-  if (probeToggle) {
+  // --probe và --probe-toggle đều giả định xuất phát từ ĐỦ cả vũ trụ hiện tại: --probe assert
+  // 'rail tiles' khớp services.length, --probe-toggle assert "đủ kênh để test" — prefs.json
+  // rớt lại từ lần probe trước (vd --probe-toggle để lại 3/4 kênh) sẽ thu hẹp vũ trụ đó, làm
+  // lần chạy sau fail oan chứ không phải vì bug thật. Chỉ reset phần TRONG vũ trụ hiện tại,
+  // giữ nguyên id NGOÀI vũ trụ (cùng logic merge của persist()) — không thì test merge ở
+  // Finding 3 tự phá chính dữ liệu nó cần kiểm tra.
+  //
+  // --probe-prefs KHÔNG được liệt ở đây: mode đó tồn tại để ĐỌC LẠI đúng cái đang có trên đĩa
+  // (do --probe-toggle vừa ghi) — reset ở đây sẽ xoá luôn assertion duy nhất mà nó có.
+  if (probe || probeToggle) {
     // Máy sạch chưa từng chạy probe thì probeDir chưa tồn tại — savePrefs ghi file tạm bên
     // trong đó nên cần thư mục có sẵn trước, không thì ENOENT văng ra TRƯỚC cả runProbe (ở
     // đây còn chưa kịp định nghĩa), Electron treo với dialog "App threw an error during load"
