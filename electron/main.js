@@ -12,7 +12,7 @@ const {
 const path = require('path')
 const fs = require('fs')
 const {
-  isInternal, isSurface, resolveServices, unreadFromTitle, resolveEnabled, railVisible,
+  SERVICES, isInternal, isSurface, resolveServices, unreadFromTitle, resolveEnabled, railVisible,
 } = require('./services')
 const { loadPrefs, savePrefs } = require('./prefs')
 
@@ -38,8 +38,7 @@ if (probe || probeToggle || process.argv.includes('--probe-prefs')) {
     // đây còn chưa kịp định nghĩa), Electron treo với dialog "App threw an error during load"
     // trong môi trường headless không ai bấm tắt được.
     fs.mkdirSync(probeDir, { recursive: true })
-    const outside = (loadPrefs(probeDir).enabled || []).filter(id => !services.some(s => s.id === id))
-    savePrefs(probeDir, { enabled: outside, railCollapsed: false })
+    savePrefs(probeDir, { enabled: outsideUniverse(loadPrefs(probeDir).enabled), railCollapsed: false })
   }
 }
 const probeOpened = []
@@ -97,11 +96,22 @@ let railCollapsed = false
 
 function enabledIds () { return runtimes.map(r => r.service.id) }
 
+/**
+ * Kênh nằm NGOÀI universe hiện tại trong một danh sách `enabled` đã lưu (hoặc `null`).
+ * `null` = chưa chọn gì = mọi kênh đã biết đang bật — KHÔNG phải rỗng. Coi là rỗng thì lần
+ * ghi đầu tiên dưới FBMESS_SERVICES thu hẹp sẽ xoá vĩnh viễn các kênh ngoài universe đó
+ * (dùng chung cho persist() và reset đầu probe — hai chỗ này từng lệch nhau vì mỗi nơi tự
+ * chép lại logic, một nơi quên xử lý `null`).
+ */
+function outsideUniverse (storedEnabled) {
+  return (storedEnabled || SERVICES.map(s => s.id)).filter(id => !services.some(s => s.id === id))
+}
+
 function persist () {
   const dir = app.getPath('userData')
   // Giữ id nằm NGOÀI universe hiện tại: chạy với FBMESS_SERVICES thu hẹp không được
   // biến "universe bị thu hẹp để debug" thành "user đã tắt mấy kênh kia" vĩnh viễn.
-  const outside = (loadPrefs(dir).enabled || []).filter(id => !services.some(s => s.id === id))
+  const outside = outsideUniverse(loadPrefs(dir).enabled)
   savePrefs(dir, { enabled: [...enabledIds(), ...outside], railCollapsed })
 }
 
@@ -425,6 +435,10 @@ app.whenReady().then(() => {
     const pids = new Map(runtimes.map(r => [r.service.id, r.view.webContents.getOSProcessId()]))
     console.log(`bật ${runtimes.length} kênh: ${[...pids.entries()].map(([k, v]) => k + '=' + v).join(' ')}`)
 
+    // Precondition: universe 1 kênh thì vòng lặp tắt bên dưới không có gì để tắt, leaked
+    // rỗng so rỗng PASS vô nghĩa — đúng lúc phải chứng minh process thật sự chết.
+    check('universe đủ để test tắt kênh', services.length >= 2, true)
+
     // Precondition: nếu prefs.json (kể cả của chính probe trước đó) để lại ít hơn đủ kênh,
     // vòng lặp tắt bên dưới không tắt gì và assert liveness PASS rỗng-so-rỗng một cách vô
     // nghĩa — đúng lúc nó phải chứng minh process thật sự chết.
@@ -451,13 +465,21 @@ app.whenReady().then(() => {
     setEnabled(keep, false)
     check('còn bật sau khi thử tắt kênh cuối', runtimes.length, 1)
 
-    // Bật lại phải vào đúng vị trí canonical. Bật services[3] TRƯỚC services[1] để chứng
-    // minh chèn giữa — nếu chỉ append thì thứ tự sẽ là [0],[3],[1] và assert này fail.
-    setEnabled(services[3].id, true)
-    setEnabled(services[1].id, true)
-    check('thứ tự canonical sau khi bật lại',
-      runtimes.map(r => r.service.id),
-      [services[0].id, services[1].id, services[3].id])
+    if (services.length >= 4) {
+      // Bật lại phải vào đúng vị trí canonical. Bật services[3] TRƯỚC services[1] để chứng
+      // minh chèn giữa — nếu chỉ append thì thứ tự sẽ là [0],[3],[1] và assert này fail.
+      setEnabled(services[3].id, true)
+      setEnabled(services[1].id, true)
+      check('thứ tự canonical sau khi bật lại',
+        runtimes.map(r => r.service.id),
+        [services[0].id, services[1].id, services[3].id])
+    } else {
+      // services[3]/services[1] đánh index tuyệt đối — universe hẹp hơn 4 kênh (vd chạy với
+      // FBMESS_SERVICES thu hẹp để debug) sẽ .id trên undefined và văng exception thay vì
+      // FAIL có ý nghĩa. Bỏ qua và NÓI RA, không thì coverage bị thu hẹp âm thầm trông như
+      // full coverage.
+      console.log(`bỏ qua check thứ tự canonical: universe chỉ ${services.length} kênh, cần >= 4`)
+    }
 
     persist()
   })
