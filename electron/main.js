@@ -19,10 +19,31 @@ const keepChrome = process.env.FBMESS_KEEP_FB_CHROME === '1'
 const probe = process.argv.includes('--probe')
 const probeOpened = []
 
+let probeFailed = 0
+
+/** Assert cho probe mode: in PASS/FAIL và đếm, để process exit code phản ánh kết quả. */
+function check (label, actual, expected) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected)
+  if (!ok) probeFailed++
+  console.log(`${ok ? 'PASS' : 'FAIL'} ${label}: ${JSON.stringify(actual)}${ok ? '' : ' — kỳ vọng ' + JSON.stringify(expected)}`)
+}
+
+/** Thoát với code khác 0 khi có assert fail — không thì CI coi như pass. */
+function probeExit () {
+  console.log(probeFailed ? `${probeFailed} assert FAIL` : 'tất cả assert PASS')
+  app.isQuitting = true
+  app.exit(probeFailed ? 1 : 0)
+}
+
 let win = null
 let railView = null
 let tray = null
-let activeIndex = 0
+// Danh tính kênh đang xem là `id`, KHÔNG phải index: runtimes[] co giãn khi bật/tắt kênh
+// nên mọi index đang giữ đều lệch một cách im lặng.
+let activeId = null
+
+function active () { return runtimes.find(r => r.service.id === activeId) }
+function activeIdx () { return runtimes.findIndex(r => r.service.id === activeId) }
 /** @type {{service: any, view: WebContentsView, unread: string|null}[]} */
 const runtimes = []
 
@@ -53,14 +74,14 @@ function layout () {
   const { width, height } = win.getContentBounds()
   const railW = services.length > 1 ? RAIL_WIDTH : 0
   if (railView) railView.setBounds({ x: 0, y: 0, width: railW, height })
-  const rt = runtimes[activeIndex]
+  const rt = active()
   if (rt) rt.view.setBounds({ x: railW, y: 0, width: Math.max(0, width - railW), height })
 }
 
 function pushRailState () {
   if (!railView) return
   const state = {
-    active: activeIndex,
+    active: activeIdx(),
     items: runtimes.map(r => ({
       id: r.service.id, title: r.service.title, tint: r.service.tint, unread: r.unread,
     })),
@@ -71,7 +92,7 @@ function pushRailState () {
 }
 
 function updateBadge () {
-  const rt = runtimes[activeIndex]
+  const rt = active()
   const total = runtimes.reduce((n, r) => n + (r.unread ? parseInt(r.unread, 10) || 0 : 0), 0)
   if (app.dock) app.dock.setBadge(total > 0 ? String(total) : '')
   // Số cạnh icon menu bar — buildTray chạy sau createWindow nên tray có thể chưa tồn tại.
@@ -138,12 +159,13 @@ function makeServiceView (service) {
   return view
 }
 
-function select (i) {
-  if (i < 0 || i >= runtimes.length || !win) return
-  const prev = runtimes[activeIndex]
-  if (prev && prev.view !== runtimes[i].view) win.contentView.removeChildView(prev.view)
-  activeIndex = i
-  win.contentView.addChildView(runtimes[i].view)
+function selectId (id) {
+  const next = runtimes.find(r => r.service.id === id)
+  if (!next || !win) return
+  const prev = active()
+  if (prev && prev !== next) win.contentView.removeChildView(prev.view)
+  activeId = id
+  win.contentView.addChildView(next.view)
   layout()
   pushRailState()
   updateBadge()
@@ -166,6 +188,7 @@ function createWindow () {
     railView.webContents.on('did-finish-load', pushRailState)
   }
 
+  activeId = runtimes[0].service.id
   win.contentView.addChildView(runtimes[0].view)
   layout()
   win.on('resize', layout)
@@ -197,12 +220,12 @@ function buildTray () {
     tray.setContextMenu(Menu.buildFromTemplate([
       ...runtimes.map((r, i) => ({
         label: r.service.title + (r.unread ? `  (${r.unread})` : ''),
-        type: 'radio', checked: i === activeIndex,
-        click: () => { select(i); win.show() },
+        type: 'radio', checked: r.service.id === activeId,
+        click: () => { selectId(r.service.id); win.show() },
       })),
       { type: 'separator' },
       { label: 'Hiện/ẩn cửa sổ', accelerator: 'Cmd+Shift+M', click: toggleWindow },
-      { label: 'Tải lại', click: () => runtimes[activeIndex].view.webContents.reload() },
+      { label: 'Tải lại', click: () => active().view.webContents.reload() },
       { type: 'separator' },
       { label: 'Thoát', click: () => { app.isQuitting = true; app.quit() } },
     ]))
@@ -218,12 +241,13 @@ function buildMenu () {
       label: app.getName(),
       submenu: [
         ...runtimes.map((r, i) => ({
-          label: r.service.title, accelerator: `Cmd+${i + 1}`, click: () => select(i),
+          label: r.service.title, accelerator: `Cmd+${i + 1}`,
+          click: () => selectId(r.service.id),
         })),
         { type: 'separator' },
-        { label: 'Về trang chính', accelerator: 'Cmd+Shift+H', click: () => runtimes[activeIndex].view.webContents.loadURL(runtimes[activeIndex].service.url) },
-        { label: 'Quay lại', accelerator: 'Cmd+[', click: () => { const wc = runtimes[activeIndex].view.webContents; if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack() } },
-        { label: 'Tải lại', accelerator: 'Cmd+R', click: () => runtimes[activeIndex].view.webContents.reload() },
+        { label: 'Về trang chính', accelerator: 'Cmd+Shift+H', click: () => active().view.webContents.loadURL(active().service.url) },
+        { label: 'Quay lại', accelerator: 'Cmd+[', click: () => { const wc = active().view.webContents; if (wc.navigationHistory.canGoBack()) wc.navigationHistory.goBack() } },
+        { label: 'Tải lại', accelerator: 'Cmd+R', click: () => active().view.webContents.reload() },
         { type: 'separator' },
         { label: 'Ẩn cửa sổ', accelerator: 'Cmd+W', click: () => win.hide() },
         { label: 'Thoát', accelerator: 'Cmd+Q', click: () => { app.isQuitting = true; app.quit() } },
@@ -242,7 +266,11 @@ app.whenReady().then(() => {
     cb(permission === 'notifications' || permission === 'media')
   })
 
-  ipcMain.on('rail:select', (_e, i) => select(i))
+  // Rail gửi vị trí tile; đổi ngay sang id vì index chỉ đúng tại thời điểm render.
+  ipcMain.on('rail:select', (_e, i) => {
+    const rt = runtimes[i]
+    if (rt) selectId(rt.service.id)
+  })
   // URL đến từ nội dung trang — không tin. shell.openExternal với scheme lạ là lỗ hổng.
   ipcMain.on('fbmess:open-external', (_e, url) => {
     if (!/^https?:\/\//i.test(url)) return
@@ -263,7 +291,8 @@ app.whenReady().then(() => {
     const tiles = railView
       ? await railView.webContents.executeJavaScript('document.querySelectorAll(".tile").length')
       : 0
-    console.log(`rail tiles: ${tiles} (kỳ vọng ${services.length})`)
+    check('rail tiles', tiles, services.length)
+    check('activeId', activeId, services[0].id)
     for (const r of runtimes) {
       const wc = r.view.webContents
       const login = await wc.executeJavaScript(
@@ -273,7 +302,7 @@ app.whenReady().then(() => {
     }
     // Link policy: click phải là tầng quyết định, không phải navigation. Test bằng click
     // tổng hợp trên chính trang đang load — chứng minh preload chạy trong ngữ cảnh thật.
-    const wc = runtimes[0].view.webContents
+    const wc = active().view.webContents
     const clickOn = async (href) => {
       await wc.executeJavaScript(`(() => {
         const a = document.createElement('a')
@@ -292,8 +321,7 @@ app.whenReady().then(() => {
     console.log(`link ngoài  → openExternal: ${afterExternal > before ? 'CÓ (đúng)' : 'KHÔNG (SAI)'}`)
     console.log(`link surface → openExternal: ${afterSurface > afterExternal ? 'CÓ (SAI)' : 'KHÔNG (đúng)'}`)
 
-    app.isQuitting = true
-    app.quit()
+    probeExit()
   }, 25000)
 })
 
