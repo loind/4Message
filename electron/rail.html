@@ -1,0 +1,41 @@
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    background: Canvas; -webkit-user-select: none; }
+  #rail { display: flex; flex-direction: column; align-items: center;
+    gap: 10px; padding: 12px 10px; }
+  .tile { position: relative; width: 48px; height: 48px; border: 0; border-radius: 12px;
+    display: grid; place-items: center; font-size: 22px; cursor: pointer;
+    color: #fff; }
+  /* Màu ĐỤC, không dùng alpha: alpha phủ nền không biết trước làm light mode nhạt toẹt
+     và tile inactive nổi hơn active — đã mắc lỗi này ở bản Swift. */
+  .tile.inactive { filter: saturate(0.45) brightness(0.75); }
+  .tile.active { outline: 2.5px solid color-mix(in srgb, CanvasText 75%, transparent);
+    outline-offset: 0; }
+  .badge { position: absolute; top: 2px; right: 2px; min-width: 15px; height: 15px;
+    padding: 0 4px; border-radius: 8px; background: #ff3b30; color: #fff;
+    font: 600 9.5px/15px -apple-system, system-ui; text-align: center; }
+</style>
+<div id="rail"></div>
+<script>
+  window.render = (state) => {
+    const el = document.getElementById('rail')
+    el.innerHTML = ''
+    state.items.forEach((it, i) => {
+      const b = document.createElement('button')
+      b.className = 'tile ' + (i === state.active ? 'active' : 'inactive')
+      b.style.background = it.tint
+      b.title = it.title
+      b.setAttribute('aria-label', it.title)
+      b.textContent = it.symbol
+      if (it.unread) {
+        const d = document.createElement('span')
+        d.className = 'badge'; d.textContent = it.unread
+        b.appendChild(d)
+      }
+      b.onclick = () => window.rail.select(i)
+      el.appendChild(b)
+    })
+  }
+</script>

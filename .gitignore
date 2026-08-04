@@ -10,3 +10,7 @@ build-icon/
 *.bc
 memory-track.csv
 probe-electron/node_modules/
+electron/node_modules/
+electron/build-info.json
+build-electron/
+FB-Mess-Electron-*.zip
