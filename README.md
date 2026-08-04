@@ -13,6 +13,7 @@ ro khoá tài khoản. Đánh đổi: memory là của web app, không sửa đ�
 | `docs/perf-process.md` | Quy trình đo hiệu năng + các hướng tối ưu đã thử và thất bại |
 | `docs/ui-discipline.md` | Kỷ luật soi DOM và AppKit — các bẫy selector/layout đã mắc |
 | `docs/decisions/` | Quyết định kiến trúc kèm số liệu |
+| `electron/README.md` | Bản Electron (engine Blink) — hướng dẫn build và khác biệt |
 
 ## Build
 
@@ -32,6 +33,17 @@ Chạy riêng phần kiểm tra logic:
 ```bash
 swift run Messenger --selftest
 ```
+
+### Bản Electron
+
+Có bản thứ hai dùng engine Blink, vì WKWebView bùng 60–100% CPU theo đợt làm nội dung
+đóng băng (Blink đo 0.58% trung bình qua 14 giờ trên cùng trang).
+
+```bash
+./build-electron.sh     # → FBMessElectron.app + FBMessElectron-arm64.zip
+```
+
+Hai bản chạy song song được, session tách riêng. Hướng dẫn đầy đủ: `electron/README.md`.
 
 ## Dùng
 
@@ -190,6 +202,8 @@ phải thử lại; số liệu ở `docs/perf-process.md`.
 | `./docs-check.sh` | Kiểm tra docs không lệch code: env var và script đều phải được nhắc |
 | `./freeze-sample.sh` | Chụp stack trace của WebContent **đúng lúc** nội dung đóng băng |
 | `./chrome-probe.sh` | Đo CPU của Chrome trên cùng trang, để so với WKWebView |
+| `./launch-chrome.sh` | Mở kênh chat trong Chrome app mode — Blink thật, 0 dòng code app |
+| `./build-electron.sh` | Build bản Electron thành `.app` + `.zip`. Xem `electron/README.md` |
 
 ## Đo hiệu năng — so với Franz
 
