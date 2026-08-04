@@ -10,7 +10,7 @@ Messenger, Blink trung bình 0.58% qua 14 giờ. Chi tiết: `plans/2026-08-03-e
 ## Build
 
 ```bash
-./build-electron.sh            # → "FB Mess Electron.app" ở gốc repo (arm64)
+./build-electron.sh            # → FBMessElectron.app ở gốc repo (arm64)
 ./build-electron.sh --run
 FBMESS_ARCH=universal ./build-electron.sh   # nếu cần chạy trên Intel
 ```
@@ -20,7 +20,7 @@ FBMESS_ARCH=universal ./build-electron.sh   # nếu cần chạy trên Intel
 ## Kiểm tra khi không có màn hình
 
 ```bash
-"./FB Mess Electron.app/Contents/MacOS/FB Mess Electron" --probe
+./FBMessElectron.app/Contents/MacOS/FBMessElectron --probe
 ```
 
 In ra: số tile của rail, URL + title + trạng thái login của từng service, và hai case
@@ -36,7 +36,7 @@ không có GUI session — `screencapture` ở đó chỉ ra desktop trống.
 
 ## Session tách riêng với bản Swift
 
-Store ở `~/Library/Application Support/FB Mess Electron/`, không phải `~/Library/WebKit/`.
+Store ở `~/Library/Application Support/FBMessElectron/`, không phải `~/Library/WebKit/`.
 Cookie KHÔNG chuyển sang được → phải login lại cả ba kênh. Mỗi lần login là một device
 E2EE mới, nên hội thoại mã hoá đầu-cuối sẽ không có lịch sử cũ ở app này.
 

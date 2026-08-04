@@ -13,4 +13,4 @@ probe-electron/node_modules/
 electron/node_modules/
 electron/build-info.json
 build-electron/
-FB-Mess-Electron-*.zip
+FBMessElectron-*.zip

@@ -1,6 +1,6 @@
 {
   "name": "fbmess-electron",
-  "productName": "FB Mess Electron",
+  "productName": "FBMessElectron",
   "version": "0.1.0",
   "private": true,
   "description": "Messenger / Instagram / Threads trong mot app, engine Blink",

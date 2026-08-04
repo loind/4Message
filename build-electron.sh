@@ -4,13 +4,13 @@
 #   ./build-electron.sh          # → "FB Mess Electron.app" ở gốc repo
 #   ./build-electron.sh --run    # build xong mở luôn
 #
-# Session store nằm ở ~/Library/Application Support/FB Mess Electron/ — TÁCH RIÊNG với bản
+# Session store nằm ở ~/Library/Application Support/FBMessElectron/ — TÁCH RIÊNG với bản
 # Swift (~/Library/WebKit/...). Cookie không chuyển được, phải login lại trong app này, và
 # mỗi lần login là một device E2EE mới nên lịch sử chat mã hoá không theo sang.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME="FB Mess Electron"
+APP_NAME=FBMessElectron
 SRC=electron
 CACHE="${NPM_CACHE:-$TMPDIR/fbmess-npm-cache}"
 
@@ -31,7 +31,7 @@ echo "build-info: $COMMIT dirty=$DIRTY"
 [ -d "$SRC/node_modules/electron" ] || (cd "$SRC" && npm install --cache "$CACHE" --save-dev electron)
 node "$SRC/selftest.js"
 
-rm -rf "$APP_NAME.app"
+rm -rf "$APP_NAME.app" "$APP_NAME-arm64.zip"
 (cd "$SRC" && npx --yes --cache "$CACHE" @electron/packager . "$APP_NAME" \
   --platform=darwin --arch="${FBMESS_ARCH:-arm64}" --out=../build-electron --overwrite \
   --app-bundle-id=io.mobio.fbmess.electron \
@@ -43,6 +43,9 @@ rm -rf build-electron
 # Ad-hoc sign: không sign thì Gatekeeper chặn và các entitlement (notification) im lặng fail.
 codesign --force --deep --sign - "$APP_NAME.app" 2>/dev/null || echo "cảnh báo: codesign fail"
 
+ditto -c -k --sequesterRsrc --keepParent "$APP_NAME.app" "$APP_NAME-arm64.zip"
+
 echo "→ $(pwd)/$APP_NAME.app"
+echo "→ $(pwd)/$APP_NAME-arm64.zip ($(du -h "$APP_NAME-arm64.zip" | cut -f1 | tr -d ' '))"
 "./$APP_NAME.app/Contents/MacOS/$APP_NAME" --version || true
 [ "${1:-}" = "--run" ] && open "$APP_NAME.app"
