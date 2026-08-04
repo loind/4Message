@@ -87,4 +87,33 @@ assert.strictEqual(railVisible(2, false), true)
 assert.strictEqual(railVisible(2, true), false)
 assert.strictEqual(railVisible(1, true), false)
 
+const os = require('os')
+const fs = require('fs')
+const path = require('path')
+const { loadPrefs, savePrefs } = require('./prefs')
+
+const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fbmess-prefs-'))
+
+// Chưa có file → mặc định. enabled=null nghĩa "chưa chọn", khác [] nghĩa "chọn rỗng".
+assert.deepStrictEqual(loadPrefs(dir), { enabled: null, railCollapsed: false })
+
+// File rác không được làm sập app.
+fs.writeFileSync(path.join(dir, 'prefs.json'), '{ this is not json')
+assert.deepStrictEqual(loadPrefs(dir), { enabled: null, railCollapsed: false })
+
+// Kiểu sai từng field cũng phải chịu được.
+fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ enabled: 'messenger', railCollapsed: 'true' }))
+assert.deepStrictEqual(loadPrefs(dir), { enabled: null, railCollapsed: false })
+fs.writeFileSync(path.join(dir, 'prefs.json'), JSON.stringify({ enabled: ['messenger', 7, null] }))
+assert.deepStrictEqual(loadPrefs(dir), { enabled: ['messenger'], railCollapsed: false })
+
+// Round trip.
+savePrefs(dir, { enabled: ['messenger', 'zalo'], railCollapsed: true })
+assert.deepStrictEqual(loadPrefs(dir), { enabled: ['messenger', 'zalo'], railCollapsed: true })
+
+// Ghi xong không được để lại file tạm.
+assert.deepStrictEqual(fs.readdirSync(dir), ['prefs.json'])
+
+fs.rmSync(dir, { recursive: true, force: true })
+
 console.log(`selftest OK (${SERVICES.length} services)`)
