@@ -130,8 +130,9 @@ cd electron && ./node_modules/.bin/electron preview-rail.js /tmp/rail   # rail r
 `--probe` in ra số tile của rail, URL + title + trạng thái login của từng kênh, và hai case
 link policy (link ngoài phải ra browser, link surface phải giữ trong app). Tự thoát sau ~25s.
 
-`preview-rail.js` sinh `/tmp/rail-light.png` + `/tmp/rail-dark.png` từ chính `rail.html`.
-Soi **cả hai** theme: bug rail chỉ hiện ở một theme đã xảy ra rồi (`docs/ui-discipline.md`).
+`preview-rail.js` sinh 6 file `/tmp/rail-{light,dark}-{1,2,4}.png` từ chính `rail.html` —
+số kênh bật đổi được lúc chạy (menu Kênh) nên rail 1 và 2 tile là trạng thái thật, không chỉ
+4. Soi **cả hai** theme: bug rail chỉ hiện ở một theme đã xảy ra rồi (`docs/ui-discipline.md`).
 
 Icon menu bar sinh lại bằng `./node_modules/.bin/electron make-tray-icon.js`. Nó là
 **template image** (đen + alpha) nên macOS tự đảo màu theo menu bar sáng/tối — đặt màu cứng
@@ -155,6 +156,8 @@ desktop trống, không soi bằng mắt được.
 | Thao tác | Kết quả |
 | --- | --- |
 | Click tile trên rail / ⌘1 ⌘2 ⌘3 | Đổi kênh |
+| `⌘0` | Ẩn/hiện cột kênh. Nhớ qua lần chạy sau |
+| Menu **Kênh** | Bật/tắt từng kênh. Tắt là hủy view — **kênh tắt không báo tin nữa** |
 | `⌘⇧M` | Hiện/ẩn cửa sổ (global) |
 | `⌘⇧H` | Về trang chính của kênh đang xem |
 | `⌘[` | Quay lại |
@@ -172,6 +175,28 @@ E2EE mới, nên hội thoại mã hoá đầu-cuối sẽ không có lịch s�
 Đổi `productName` trong `electron/package.json` cũng đổi đường dẫn store → mất session.
 Đừng đổi sau khi đã login.
 
+## Bật/tắt kênh
+
+Menu **Kênh** (thanh menu trên) và menu tray đều bật/tắt được từng kênh. Tắt một kênh là
+`webContents.close()` — process renderer của nó chết, RAM trả về OS. Đánh đổi: **kênh tắt
+không báo tin nữa** và bật lại phải load lại.
+
+Vì vậy ⌘0 tách rời: nó chỉ ẩn cột, cả 4 kênh vẫn sống và vẫn báo tin.
+
+Không cho tắt kênh cuối cùng — cửa sổ rỗng không có đường thoát bằng chuột. Menu item bị
+disable, không im lặng bỏ qua.
+
+Trạng thái ở `~/Library/Application Support/FBMessElectron/prefs.json`. File hỏng hoặc thiếu
+→ về mặc định (bật tất cả), không crash. `FBMESS_SERVICES` vẫn là vũ trụ kênh khả dụng;
+prefs chỉ bật/tắt trong đó.
+
+Kiểm không cần nhìn màn hình:
+
+```bash
+./FBMessElectron.app/Contents/MacOS/FBMessElectron --probe-toggle   # tắt 3 kênh, chứng minh process chết
+./FBMessElectron.app/Contents/MacOS/FBMessElectron --probe-prefs    # in trạng thái đã lưu
+```
+
 ## Khác biệt so với bản Swift
 
 | Việc | Swift | Electron |
@@ -179,7 +204,7 @@ E2EE mới, nên hội thoại mã hoá đầu-cuối sẽ không có lịch s�
 | Web Notification | shim JS → `UNUserNotificationCenter` | Blink hiện native, chỉ cần cấp quyền |
 | Chặn link | `navigationType == .linkActivated` | click capture trong preload |
 | Hotkey | Carbon `RegisterEventHotKey` | `globalShortcut` |
-| Thu gọn rail (⌘0) | có | chưa có |
+| Thu gọn rail (⌘0) | có | có |
 | `FBMESS_TOPOLOGY` / `MODE` / `UA` / `WINDOW` | có (knob để đo) | không port — đều đã đo ra kết quả âm |
 
 **Chặn link phải ở tầng CLICK, không phải navigation.** `will-navigate` không phân biệt được
@@ -193,12 +218,13 @@ nhưng NGOÀI surface — nên chặn theo navigation là chặn luôn login. B�
 ```
 electron/
   main.js             process chính: window, rail, view mỗi kênh, tray, menu, link policy
+  prefs.js            đọc/ghi prefs.json (kênh nào bật, rail có ẩn tay)
   services.js         mirror của Sources/Messenger/Services.swift — url, surface, hideRules
   rail.html           rail: tile màu bệt + glyph SVG đơn sắc
   rail-preload.js     bridge click tile → main
   service-preload.js  bắt click link, quyết định giữ trong app hay mở browser
   selftest.js         cổng build — logic surface/unread, không cần GUI/mạng
-  preview-rail.js     render rail.html ra PNG (light + dark)
+  preview-rail.js     render rail.html ra PNG, 1/2/4 tile × light/dark
   make-tray-icon.js   sinh tray.png + tray@2x.png (template image cho menu bar)
   tray.png            icon menu bar 20×20, đen + alpha. tray@2x.png cho Retina
   build-info.json     sinh lúc build, không commit
