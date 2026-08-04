@@ -56,17 +56,38 @@ qua file untracked nên báo clean khi cây đang có file mới.
 
 ## Cài lên máy khác
 
+Qua GitHub Release — máy đích không cần `node`, chỉ cần `gh`:
+
 ```bash
-# trên máy đích, sau khi copy zip sang
-unzip FBMessElectron-arm64.zip
-mv FBMessElectron.app /Applications/
-xattr -dr com.apple.quarantine /Applications/FBMessElectron.app
-open /Applications/FBMessElectron.app
+# máy build
+./release-electron.sh        # build + tạo release tag electron-b<số build>
+
+# máy dùng
+./install-electron.sh        # tải release mới nhất, quit app cũ, cài, mở lại
 ```
 
-Bỏ quarantine vì bundle chỉ ad-hoc sign (không có Developer ID, không notarize). Không chạy
-lệnh đó thì lần đầu mở macOS chặn — vẫn mở được qua **Cài đặt Hệ thống → Bảo mật → Mở bằng
-mọi cách**, chỉ là thêm bước.
+Số build = `git rev-list --count HEAD`, cùng scheme với `CFBundleVersion` của bản Swift, nên
+"đang ở build mấy" nói được cho cả hai bản. Một commit = một release; release lại cùng commit
+bị chặn.
+
+**Không commit `.zip` vào repo.** Nó 114 MB mà GitHub chặn cứng push file > 100 MB, và mỗi
+bản build sẽ nằm vĩnh viễn trong git history. Release asset không vào history, giới hạn 2 GB.
+
+**Tải bằng `gh`, không bằng browser.** File browser tải bị gắn `com.apple.quarantine` nên
+Gatekeeper chặn (bundle chỉ ad-hoc sign, không notarize) và phải
+`xattr -dr com.apple.quarantine` mới mở được. `gh` chỉ gắn `com.apple.provenance` — không
+phải cờ Gatekeeper. Đã kiểm chứng bằng một lần tải thật 1.02 MB.
+
+### Cách khác: build ngay trên máy dùng
+
+Nếu máy dùng có `node` thì khỏi cần tải 114 MB:
+
+```bash
+git pull --ff-only && ./build-electron.sh
+```
+
+Build lần hai hết ~13s (M4), cache Electron 352 MB một lần. App build tại máy cũng không bị
+quarantine. Đánh đổi: máy dùng phải có toolchain.
 
 ## Kiểm tra
 

@@ -225,6 +225,8 @@ phải thử lại; số liệu ở `docs/perf-process.md`.
 | `./chrome-probe.sh` | Đo CPU của Chrome trên cùng trang, để so với WKWebView |
 | `./launch-chrome.sh` | Mở kênh chat trong Chrome app mode — Blink thật, 0 dòng code app |
 | `./build-electron.sh` | Build bản Electron thành `.app` + `.zip`. Xem `electron/README.md` |
+| `./release-electron.sh` | Build rồi đẩy lên GitHub Release, tag `electron-b<số build>` |
+| `./install-electron.sh` | Cài bản Release mới nhất lên máy dùng. Không cần node |
 
 ## Đo hiệu năng — so với Franz
 

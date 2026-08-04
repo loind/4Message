@@ -33,7 +33,7 @@ function buildInfo () {
 
 if (process.argv.includes('--version')) {
   const b = buildInfo()
-  console.log(`FB Mess (Electron) ${app.getVersion()}`)
+  console.log(`FB Mess (Electron) ${app.getVersion()} · build ${b.build ?? '?'}`)
   console.log(`commit   ${b.commit}${b.dirty ? ' (DIRTY)' : ''}`)
   console.log(`built    ${b.built}`)
   console.log(`electron ${process.versions.electron} · chromium ${process.versions.chrome}`)
