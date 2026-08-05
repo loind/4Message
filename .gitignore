@@ -9,6 +9,6 @@ probe-electron/node_modules/
 electron/node_modules/
 electron/build-info.json
 build-electron/
-4Messenge-*.tar.xz
+4Message-*.tar.xz
 *.log
 /.json

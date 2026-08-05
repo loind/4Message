@@ -1,6 +1,6 @@
 {
   "name": "fbmess-electron",
-  "productName": "4Messenge",
+  "productName": "4Message",
   "version": "0.1.0",
   "private": true,
   "description": "Messenger / Instagram / Threads trong mot app, engine Blink",

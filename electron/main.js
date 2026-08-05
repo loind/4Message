@@ -1,4 +1,4 @@
-// 4Messenge — cùng UX với bản Swift: rail chọn kênh, ẩn chrome, link ngoài
+// 4Message — cùng UX với bản Swift: rail chọn kênh, ẩn chrome, link ngoài
 // surface mở browser, tray resident, global hotkey, badge unread.
 //
 // Vì sao có bản này: WKWebView bùng 60–100% CPU theo đợt khiến nội dung đóng băng, trong

@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Build bản Electron thành .app dùng được.
 #
-#   ./build-electron.sh          # → 4Messenge.app + .zip ở gốc repo
+#   ./build-electron.sh          # → 4Message.app + .zip ở gốc repo
 #   ./build-electron.sh --run    # build xong mở luôn
 #
-# Session store nằm ở ~/Library/Application Support/4Messenge/ — TÁCH RIÊNG với bản
+# Session store nằm ở ~/Library/Application Support/4Message/ — TÁCH RIÊNG với bản
 # Swift (~/Library/WebKit/...). Cookie không chuyển được, phải login lại trong app này, và
 # mỗi lần login là một device E2EE mới nên lịch sử chat mã hoá không theo sang.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP_NAME=4Messenge
+APP_NAME=4Message
 SRC=electron
 CACHE="${NPM_CACHE:-$TMPDIR/fbmess-npm-cache}"
 ARCH="${FBMESS_ARCH:-arm64}"
