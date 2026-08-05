@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 APP_NAME=4Message
-REPO=loind/CustomMess
+REPO=loind/4Message
 
 command -v gh >/dev/null || { echo "cần gh CLI: brew install gh"; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "gh chưa login: gh auth login"; exit 1; }
