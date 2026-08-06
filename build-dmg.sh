@@ -18,7 +18,7 @@ DMG="$APP_NAME-arm64.dmg"
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"; hdiutil detach "/Volumes/$VOL" -quiet 2>/dev/null || true' EXIT
 
-[ "${1:-}" = "--keep" ] || ./build-electron.sh >/dev/null
+[ "${1:-}" = "--keep" ] || ./build-electron.sh
 [ -d "$APP" ] || { echo "không có $APP — chạy ./build-electron.sh trước"; exit 1; }
 
 # codesign/spctl hiểu đối số bắt đầu bằng chữ số là PID, nên "4Message.app" ra

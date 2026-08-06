@@ -18,7 +18,8 @@ khoá tài khoản. Đánh đổi: memory là của web app, không sửa đư�
 ## Build
 
 ```bash
-./build-electron.sh          # → 4Message.app + 4Message-arm64.tar.xz
+./build-electron.sh          # → 4Message.app
+./build-dmg.sh               # → 4Message-arm64.dmg (bản để phát hành)
 ./build-electron.sh --run
 ```
 
@@ -31,8 +32,11 @@ Chi tiết từng bước và lý do thứ tự: `electron/README.md`.
 ./install-electron.sh        # máy dùng: tải release mới nhất, cài, mở lại
 ```
 
+`release-electron.sh` build cả app và DMG rồi đẩy **DMG** lên Release — đó là asset duy
+nhất. `install-electron.sh` tải DMG về, mount, copy app sang `/Applications`, unmount.
+
 Máy dùng chỉ cần `gh` đã login — không cần `node`. Nếu có `node` thì
-`git pull && ./build-electron.sh` nhanh hơn và không phải tải 80 MB.
+`git pull && ./build-electron.sh` nhanh hơn và không phải tải 112 MB.
 
 ## DMG
 
@@ -42,8 +46,11 @@ Máy dùng chỉ cần `gh` đã login — không cần `node`. Nếu có `node`
 ```
 
 Mở DMG ra thấy app cạnh shortcut `Applications`, kéo sang là cài — cách cài quen thuộc trên
-macOS. DMG nặng hơn `.tar.xz` (112 MB vs 80 MB) vì `hdiutil` nén zlib chứ không phải lzma,
-nên `install-electron.sh` vẫn dùng `.tar.xz`.
+macOS. Đây là **asset duy nhất** của mỗi Release.
+
+Đánh đổi đã chấp nhận: DMG 112 MB so với `.tar.xz` 80 MB trước đây, vì `hdiutil` nén zlib
+chứ không phải lzma. Mỗi lần cài tải thêm ~32 MB, đổi lại chỉ còn một artifact và cài đúng
+kiểu macOS.
 
 Bước sắp xếp vị trí icon và ảnh nền trong DMG cần **GUI session thật** (Finder automation).
 Máy build headless sẽ bỏ qua bước đó và vẫn ra DMG dùng được, chỉ thiếu phần trang trí.
@@ -157,7 +164,7 @@ Exit code là cổng, không phải dòng log. Mọi probe đi qua `runProbe` n�
 
 | Script | Việc |
 | --- | --- |
-| `./build-electron.sh` | Build + selftest + cắt locale + ad-hoc sign + `.tar.xz` |
+| `./build-electron.sh` | Build + selftest + cắt locale + ad-hoc sign |
 | `./release-electron.sh` | Build rồi đẩy lên GitHub Release, tag `electron-b<số build>` |
 | `./install-electron.sh` | Cài bản Release mới nhất lên máy dùng. Không cần node |
 | `./build-dmg.sh` | Đóng `.app` thành DMG có shortcut Applications để kéo vào cài |

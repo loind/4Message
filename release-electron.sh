@@ -3,7 +3,7 @@
 #
 #   ./release-electron.sh
 #
-# KHÔNG commit .zip vào repo: nó 114 MB mà GitHub chặn cứng push file > 100 MB, và mỗi bản
+# KHÔNG commit DMG vào repo: nó 112 MB mà GitHub chặn cứng push file > 100 MB, và mỗi bản
 # build sẽ nằm vĩnh viễn trong git history. Release asset không vào history, giới hạn 2 GB.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -28,9 +28,10 @@ if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
 fi
 
 ./build-electron.sh
+./build-dmg.sh --keep
 
 ELECTRON_VER=$(node -p "require('./electron/package.json').devDependencies.electron")
-gh release create "$TAG" "$APP_NAME-arm64.tar.xz" --repo "$REPO" \
+gh release create "$TAG" "$APP_NAME-arm64.dmg" --repo "$REPO" \
   --title "Electron build $BUILD" \
   --notes "commit \`$COMMIT\` · electron $ELECTRON_VER · arm64
 

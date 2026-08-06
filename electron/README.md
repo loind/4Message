@@ -29,7 +29,9 @@ Không cần Xcode. Chỉ khi `Resources/AppIcon.icns` bị mất thì `build-el
 Ra hai thứ ở gốc repo:
 
 - `4Message.app` (230 MB) — chạy được ngay trên máy build
-- `4Message-arm64.tar.xz` (70 MB) — để copy sang máy khác
+
+Đóng gói để phát hành: `./build-dmg.sh` → `4Message-arm64.dmg` (112 MB), có shortcut
+`Applications` để kéo vào cài.
 
 ```bash
 ./build-electron.sh --run                    # build xong mở luôn
@@ -56,7 +58,11 @@ Nên **dọn code app không giảm được dung lượng** — nó chiếm 0.0
 | --- | --- |
 | Gốc (zip, đủ 220 locale) | 114.1 MB |
 | Cắt 218 locale, vẫn zip | 102.3 MB |
-| Cắt locale + đổi sang tar.xz | **70.4 MB** |
+| Cắt locale + tar.xz | 70.4 MB |
+| **Hiện tại: DMG** (zlib, có shortcut Applications) | **112 MB** |
+
+DMG to hơn tar.xz 42 MB vì `hdiutil` nén zlib chứ không lzma. Chấp nhận để chỉ còn một
+artifact và cài đúng kiểu macOS — người dùng kéo app vào `Applications` thay vì giải nén.
 
 `libvk_swiftshader` 15.8 MB là software renderer fallback của Vulkan — cắt được nhưng mất
 đường lùi khi GPU driver lỗi. Không cắt.
@@ -71,8 +77,7 @@ Nên **dọn code app không giảm được dung lượng** — nó chiếm 0.0
 | 4 | `@electron/packager` → `.app` | |
 | 5 | Xoá 218 locale pak của Chromium | 45 MB cho thứ tiếng không dùng. PHẢI trước codesign — sửa bundle sau khi sign làm signature vỡ |
 | 6 | `codesign --sign -` (ad-hoc) | Không sign thì Gatekeeper chặn và entitlement (notification) im lặng fail |
-| 7 | `tar` + `xz` → `.tar.xz` | Nhỏ hơn zip 32 MB trên cùng bundle |
-| 8 | In `--version` | Xác nhận bundle vừa ra đúng commit |
+| 7 | In `--version` | Xác nhận bundle vừa ra đúng commit |
 
 `dirty` tính bằng `git status --porcelain`, không phải `git diff --quiet HEAD` — cái sau bỏ
 qua file untracked nên báo clean khi cây đang có file mới.
@@ -96,9 +101,9 @@ bị chặn.
 **Không commit `.zip` vào repo.** Nó 114 MB mà GitHub chặn cứng push file > 100 MB, và mỗi
 bản build sẽ nằm vĩnh viễn trong git history. Release asset không vào history, giới hạn 2 GB.
 
-Artifact là `.tar.xz`, giải bằng `tar -xJf` — bsdtar của macOS có liblzma sẵn nên máy đích
-không cần cài gì. Đã kiểm vòng nén/giải: `codesign --verify --deep --strict` pass, symlink
-trong framework nguyên.
+Artifact là `.dmg`. `install-electron.sh` mount nó vào thư mục tạm (`-mountpoint` +
+`-nobrowse` để không đụng `/Volumes` và không hiện lên Finder giữa lúc cài), verify
+signature, copy app sang `/Applications`, rồi detach.
 
 **Tải bằng `gh`, không bằng browser.** File browser tải bị gắn `com.apple.quarantine` nên
 Gatekeeper chặn (bundle chỉ ad-hoc sign, không notarize) và phải

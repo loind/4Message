@@ -9,7 +9,6 @@ probe-electron/node_modules/
 electron/node_modules/
 electron/build-info.json
 build-electron/
-4Message-*.tar.xz
 *.log
 /.json
 4Message-*.dmg
