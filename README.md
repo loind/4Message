@@ -222,13 +222,19 @@ trong WebCore, không sửa được từ phía shell.
 
 Blink đo trên cùng trang: 0.91% trung bình qua 25.78 giờ.
 
-Bản Swift đã xoá. Source còn trong git history ở tag `swift-final` — cần khi muốn đọc lại
-store E2EE cũ ở `~/Library/WebKit/io.mobio.loind.fbmess`, vì store đó chỉ giải mã được từ
-app có đúng bundle ID đó:
+Bản Swift đã xoá. Source còn trong git history ở tag `swift-final`:
 
 ```bash
 git checkout swift-final -- Package.swift Sources/ Resources/Info.plist build.sh
 ```
+
+Store WebKit của nó (`~/Library/WebKit/io.mobio.loind.fbmess`, 375 MB, chứa lịch sử E2EE) đã
+bị xoá ngày 2026-08-06 — không có snapshot hay Time Machine nên không phục hồi được. Nên tag
+`swift-final` giờ chỉ còn giá trị tham khảo code, không còn là đường đọc lại lịch sử cũ.
+
+Bài học đáng ghi cho lần sau: dữ liệu E2EE là **per-device**. Thiết bị nào mất store là mất
+bản sao của thiết bị đó, và không có bản trên server để tải lại. Muốn lịch sử theo được sang
+máy mới thì phải bật **secure storage (PIN)** trong Messenger *trước*, không phải sau.
 
 Chi tiết quyết định và số liệu: `plans/2026-08-04-engine-decision/brainstorm.md`.
 
