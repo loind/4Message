@@ -63,11 +63,24 @@ Gatekeeper chỉ chặn file có cờ `com.apple.quarantine` — cờ đó do **
 - `install-electron.sh` tải bằng `gh` → **không** có quarantine → app mở thẳng, không bị hỏi.
 - Tải bằng browser (kể cả DMG) → có quarantine → bị hỏi một lần.
 
-Cách xử lý ngay, miễn phí:
+Dialog trên macOS mới **không** có nút "Open Anyway" — nó chỉ cho *Move to Trash* hoặc
+*Done*, nên phải vào System Settings → Privacy & Security, hoặc bỏ cờ bằng lệnh.
+
+Bỏ cờ ở **DMG** là đủ — đã kiểm: app kéo ra khỏi DMG sau đó cũng không có cờ:
+
+```bash
+xattr -dr com.apple.quarantine ~/Downloads/4Message-arm64.dmg
+```
+
+Nếu đã copy app ra rồi mới nhớ, thì bỏ trên app:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/4Message.app
 ```
+
+Lưu ý khi tự kiểm: `spctl -a` trả `rejected` **kể cả sau khi đã bỏ cờ quarantine** — nó đánh
+giá signature/notarization, không đánh giá "có mở được không". Gatekeeper chỉ cưỡng chế trên
+file **có** cờ quarantine. Đừng dùng `spctl` để kết luận app mở được hay không.
 
 Muốn **không bao giờ** bị hỏi thì phải ký bằng Developer ID rồi notarize, và điều đó bắt
 buộc có Apple Developer Program **$99/năm**:

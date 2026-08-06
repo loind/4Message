@@ -35,6 +35,23 @@ gh release create "$TAG" "$APP_NAME-arm64.dmg" --repo "$REPO" \
   --title "Electron build $BUILD" \
   --notes "commit \`$COMMIT\` · electron $ELECTRON_VER · arm64
 
-Cài trên máy dùng: \`./install-electron.sh\`"
+## Cài
+
+\`\`\`bash
+./install-electron.sh
+\`\`\`
+
+Tải bằng \`gh\` nên không bị Gatekeeper chặn.
+
+## Nếu tải DMG bằng browser
+
+macOS sẽ báo *\"Apple could not verify ... is free of malware\"* và **không** có nút Open
+Anyway. App ký ad-hoc, chưa notarize — cần Apple Developer Program (\$99/năm) mới hết hẳn.
+
+Bỏ cờ quarantine là mở được, một lệnh, và app kéo ra khỏi DMG cũng sạch luôn:
+
+\`\`\`bash
+xattr -dr com.apple.quarantine ~/Downloads/$APP_NAME-arm64.dmg
+\`\`\`"
 
 echo "→ $(gh release view "$TAG" --repo "$REPO" --json url -q .url)"
