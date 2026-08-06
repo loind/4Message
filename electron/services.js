@@ -1,5 +1,6 @@
-// Mirror của Sources/Messenger/Services.swift. Giữ giống hệt để hai bản so sánh được và
-// để bài học selector không phải học lại.
+// Nguồn duy nhất định nghĩa kênh: url, surface, hideRules.
+//
+// Trước đây đây là mirror tay của bản Swift; bản Swift đã xoá nên file này là bản chính.
 //
 // Bốn bẫy selector đã mắc ở bản Swift, đừng lặp:
 //   1. `[role="navigation"]` trên facebook.com có 3 vùng, một trong đó là THREAD LIST.

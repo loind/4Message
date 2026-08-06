@@ -21,8 +21,8 @@ command -v node >/dev/null || { echo "cần node"; exit 1; }
 
 # build-info.json phải sinh TRƯỚC khi package, không thì bundle mang info của lần build cũ.
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
-# Cùng scheme số build với bản Swift (build.sh dùng cho CFBundleVersion) để hai bản nói
-# cùng một ngôn ngữ khi bạn báo "đang ở build mấy".
+# Số build = số commit. Đơn điệu tăng, tra được về đúng một commit, và không cần file
+# version riêng để quên cập nhật.
 BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 0)
 DIRTY=false
 [ -z "$(git status --porcelain 2>/dev/null)" ] || DIRTY=true

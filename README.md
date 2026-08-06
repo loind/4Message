@@ -1,354 +1,183 @@
-# FB Mess
+# 4Message
 
-Client chat native cho macOS: **Messenger, Instagram DM, Threads (feed + DM), Zalo** trong
-một app.
-Swift + AppKit, mỗi service là một `WKWebView` riêng. Thay thế Franz: nhẹ hơn, khởi động
-tức thì, không quảng cáo Pro.
+Client chat cho macOS: **Messenger, Instagram DM, Threads, Zalo** trong một cửa sổ. Electron
+(Blink), mỗi kênh một `WebContentsView`. Thay thế Franz: nhẹ hơn, mở lại tức thì, không
+quảng cáo Pro.
 
-Không reverse-engineer protocol của Meta — dùng đúng web app chính thức, nên không có rủi
-ro khoá tài khoản. Đánh đổi: memory là của web app, không sửa được từ phía shell
-(chi tiết ở `docs/perf-process.md`).
+Không reverse-engineer protocol của Meta — dùng đúng web app chính thức, nên không có rủi ro
+khoá tài khoản. Đánh đổi: memory là của web app, không sửa được từ phía shell.
 
 | Tài liệu | Nội dung |
 | --- | --- |
+| `electron/README.md` | **Hướng dẫn build đầy đủ** — yêu cầu, từng bước, cách verify |
+| `docs/ui-discipline.md` | Kỷ luật soi DOM — bốn bẫy selector đã mắc, vẫn còn hiệu lực |
 | `docs/perf-process.md` | Quy trình đo hiệu năng + các hướng tối ưu đã thử và thất bại |
-| `docs/ui-discipline.md` | Kỷ luật soi DOM và AppKit — các bẫy selector/layout đã mắc |
 | `docs/decisions/` | Quyết định kiến trúc kèm số liệu |
-| `electron/README.md` | Bản Electron (engine Blink) — hướng dẫn build và khác biệt |
+| `plans/` | Brainstorm và kế hoạch từng tính năng, kèm số đo tại thời điểm quyết |
 
 ## Build
 
 ```bash
-./build.sh          # build + selftest + đóng .app + ad-hoc sign
-open "FB Mess.app"
+./build-electron.sh          # → 4Message.app + 4Message-arm64.tar.xz
+./build-electron.sh --run
 ```
 
-Cài vào Applications:
+Chi tiết từng bước và lý do thứ tự: `electron/README.md`.
+
+## Phát hành và cài
 
 ```bash
-cp -r "FB Mess.app" /Applications/
+./release-electron.sh        # máy build: tạo GitHub Release electron-b<số build>
+./install-electron.sh        # máy dùng: tải release mới nhất, cài, mở lại
 ```
 
-Chạy riêng phần kiểm tra logic:
-
-```bash
-swift run Messenger --selftest
-```
-
-### Bản Electron
-
-Có bản thứ hai dùng engine Blink, vì WKWebView bùng 60–100% CPU theo đợt làm nội dung
-đóng băng (Blink đo 0.58% trung bình qua 14 giờ trên cùng trang).
-
-```bash
-./build-electron.sh     # → 4Message.app + 4Message-arm64.zip
-```
-
-Hai bản chạy song song được, session tách riêng. Hướng dẫn đầy đủ: `electron/README.md`.
+Máy dùng chỉ cần `gh` đã login — không cần `node`. Nếu có `node` thì
+`git pull && ./build-electron.sh` nhanh hơn và không phải tải 80 MB.
 
 ## Dùng
 
 | Thao tác | Kết quả |
 | --- | --- |
+| Click tile trên rail / `⌘1`–`⌘4` | Đổi kênh |
+| Menu **Kênh** (thanh menu + tray) | Bật/tắt từng kênh |
+| `⌘0` | Ẩn/hiện cột kênh. Nhớ qua lần chạy sau |
 | `⌘⇧M` | Hiện/ẩn cửa sổ (global, chạy được khi app đang ẩn) |
-| Click icon menu bar | Hiện/ẩn cửa sổ |
-| `⌘W` hoặc nút đóng | **Ẩn** cửa sổ, app vẫn chạy → lần sau mở tức thì |
-| `⌘Q` | Thoát thật |
+| `⌘⇧H` | Về trang chính của kênh đang xem |
+| `⌘[` | Quay lại |
 | `⌘R` | Tải lại |
-| `⌘⇧R` | Xoá HTTP cache rồi tải lại (không chạm IndexedDB — nơi giữ khoá E2EE) |
-| Badge trên dock | Số tin chưa đọc |
-| Số cạnh icon menu bar | Số tin chưa đọc, ẩn khi bằng 0 |
+| `⌘W` / nút đóng | **Ẩn** cửa sổ, app vẫn chạy → lần sau mở tức thì |
+| `⌘Q` | Thoát thật |
+| Badge Dock + số cạnh icon menu bar | Tổng tin chưa đọc của các kênh đang bật |
 
-Cả hai số đọc từ `document.title` của Messenger (`"(3) Chats · Messenger"`).
+Đăng nhập một lần, session lưu ở `~/Library/Application Support/4Message/`.
 
-Đăng nhập một lần, session lưu trong `WKWebsiteDataStore` persistent nên sống qua restart.
+## Bật/tắt kênh
 
-## Đổi surface
+Tắt một kênh là `webContents.close()` — process renderer chết, RAM trả về OS. Đã chứng minh
+bằng `process.kill(pid, 0)` chứ không bằng đo footprint: bmalloc trả page cho OS rất chậm nên
+footprint từng làm số liệu vô nghĩa.
 
-Mặc định `https://www.facebook.com/messages/`. Override bằng `FBMESS_URL` (chỉ nhận
-`https` và host trong `internalHosts`):
+**Đánh đổi: kênh tắt không báo tin nữa**, và bật lại phải load lại. Vì vậy `⌘0` tách rời —
+nó chỉ ẩn cột, cả bốn kênh vẫn sống và vẫn báo tin.
+
+Không cho tắt kênh cuối cùng: cửa sổ rỗng không có đường thoát bằng chuột. Menu item bị
+disable chứ không im lặng bỏ qua.
+
+Trạng thái ở `prefs.json` trong thư mục session. File hỏng hoặc thiếu → về mặc định (bật
+tất cả), không crash.
+
+## Env
+
+| Biến | Tác dụng |
+| --- | --- |
+| `FBMESS_SERVICES` | Chọn và sắp thứ tự kênh, ví dụ `messenger,instagram`. Id lạ bị bỏ |
+| `FBMESS_KEEP_FB_CHROME` | `1` = không inject CSS ẩn chrome. Dùng để A/B khi nghi rule phá layout |
+| `FBMESS_ARCH` | `arm64` (mặc định) hoặc `universal`. Chỉ ảnh hưởng lúc build |
+| `NPM_CACHE` | Thư mục npm cache. Chỉ ảnh hưởng lúc build |
+
+## Ẩn chrome không liên quan tới chat
+
+Rule nằm ở `Service.hideRules` trong `electron/services.js`, riêng từng kênh vì DOM các site
+khác nhau hoàn toàn. **Đọc comment đầu file trước khi sửa selector** — nó ghi bốn bẫy đã mắc,
+và cả bốn vẫn còn hiệu lực:
+
+1. `[role="navigation"]` trên facebook.com có 3 vùng, một trong đó là **thread list**.
+2. `[role="navigation"]` trên instagram.com **chính là** panel danh sách hội thoại.
+3. `input[role="combobox"]` khớp cả ô `Search Messenger` của chính Messenger.
+4. `[aria-label*="Facebook" i]` khớp cả **một tin nhắn** — nội dung tin cũng vào aria-label.
+
+Vì vậy ưu tiên nhận theo `href` (độc lập ngôn ngữ và tài khoản); không có href thì dùng
+aria-label **khớp chính xác** — khớp chính xác fail-safe, site đổi label thì không ẩn được
+(vô hại) chứ không ẩn nhầm thứ đang cần.
+
+**Ẩn CSS không giảm memory** — DOM node vẫn tồn tại, React vẫn render và diff. Lợi ích thật
+là chặn lỡ tay click vào Reels/Explore/Marketplace, những surface load rất nặng.
+
+Self-check 2 mốc (8s và 25s) đếm element khớp từng rule và chỉ cảnh báo ở mốc sau: nav của
+Threads render trễ nên mốc sớm luôn báo thiếu, mà cảnh báo luôn sai thì người ta quen bỏ qua
+cảnh báo thật.
+
+## Verify không cần nhìn màn hình
 
 ```bash
-FBMESS_URL='https://www.messenger.com/' "FB Mess.app/Contents/MacOS/Messenger"
+node electron/selftest.js                                # logic thuần, là cổng build
+./4Message.app/Contents/MacOS/4Message --version
+./4Message.app/Contents/MacOS/4Message --probe           # rail, link policy, tray icon
+./4Message.app/Contents/MacOS/4Message --probe-toggle    # bật/tắt kênh, process chết thật
+./4Message.app/Contents/MacOS/4Message --probe-prefs     # trạng thái đọc lại được
 ```
 
-Chọn facebook.com vì Meta ship tính năng mới (Meta AI) vào đó trước, messenger.com bị bỏ
-lại — dấu hiệu Meta chỉ còn đầu tư một surface. Đánh đổi: nặng hơn **~68 MB khi ẩn**
-(655 vs 587 MB), CPU tương đương.
+**Thứ tự bắt buộc** là `--probe` → `--probe-toggle` → `--probe-prefs`, liên tiếp. Chèn
+`--probe` vào giữa hai lệnh cuối sẽ reset `prefs.json` và làm `--probe-prefs` fail oan, đọc
+y hệt một lỗi persistence thật.
 
-Đổi ngược không mất gì: hai origin cùng tồn tại trong `WKWebsiteDataStore`, lịch sử E2EE
-của messenger.com nằm nguyên. Số liệu đầy đủ:
-`docs/decisions/2026-07-28-facebook-com-surface.md`.
-
-## Service và ẩn chrome
-
-`FBMESS_SERVICES=messenger,instagram,threads,zalo` (mặc định chỉ `messenger`). Mỗi service
-là một origin riêng → cookie, IndexedDB, device E2EE riêng; phải đăng nhập từng service.
-
-Ba cách đổi kênh:
-
-| Cách | Ghi chú |
-| --- | --- |
-| **Rail dọc trong cửa sổ** | Hiện khi có >1 service. Tile màu thương hiệu, kênh đang xem sáng + viền trắng |
-| Menu **Service** | Trên thanh menu, có dấu tick |
-| ⌘1 / ⌘2 / ⌘3 / ⌘4 | |
-
-Rail hiện **số chưa đọc của từng kênh** — đó là lý do chính để có nó, thấy kênh khác có
-tin mới mà không phải bấm qua. Với 1 service thì rail không dựng (chiếm chỗ mà không chọn
-được gì).
-
-Thu gọn rail: **Service → Ẩn cột kênh** (⌘0). Trạng thái lưu vào `UserDefaults` nên nhớ qua
-lần chạy sau. Thu gọn rồi vẫn đổi kênh được bằng ⌘1/⌘2/⌘3/⌘4 hoặc menu Service.
-
-Thiết kế rail xem trước không cần chạy app:
-
-```bash
-./preview-rail.sh out.png     # trái = light, phải = dark
-```
-
-Nó compile kèm `Sources/Messenger/RailView.swift` và gọi **đúng** `Rail.make`/`Rail.style`
-mà app dùng, nên không thể lệch. Cần công cụ này vì `screencapture` đòi quyền Screen
-Recording.
-
-Hai lỗi mà bản preview đầu tiên **không thể** phát hiện, vì nó tự dựng lại UI bằng frame
-thủ công thay vì gọi code của app:
-
-- **Tile dính liền nhau.** `NSButton` có `alignmentRectInsets` khác 0 (đo được top 6 /
-  bottom 4, đổi theo symbol). Auto Layout ràng buộc **alignment rect** chứ không phải
-  frame, nên `height = 48` cho ra frame 58; còn layer — thứ được vẽ — dùng frame. `gap = 10`
-  bị insets ăn còn 1px. Sửa bằng `RailButton` override `alignmentRectInsets` về 0.
-- **Chỉ kiểm tra ở dark mode.** Preview đặt `.cgColor` từ màu semantic *bên ngoài* block
-  appearance, nên bản "dark" render y hệt bản light. Màu phải resolve **trong**
-  `performAsCurrentDrawingAppearance`. Tile cũng chuyển sang màu **đục** — alpha phủ nền
-  không biết trước làm light mode nhạt toẹt và tile inactive nổi hơn active.
-
-**Threads là kênh feed + DM, không ẩn gì.** Web Threads CÓ DM, ở `/messages/` — không phải
-`/direct/` (`/direct` và `/direct/inbox` redirect về feed, nên tôi từng kết luận sai là
-"Threads không có DM"). Kênh này mở thẳng feed `threads.com/` và **cố tình để
-`hideRules` rỗng**: nav của Threads là đường duy nhất đi giữa feed và hộp tin nhắn, ẩn
-logo/search/activity là khoá luôn đường về feed. Surface cũng là **cả domain** chứ không
-chỉ `/messages` — giới hạn path làm mọi bài viết trong feed bật ra browser.
-
-**Zalo là service đầu tiên ngoài Meta.** Đo bằng probe Electron (2026-08-04):
-
-| Câu hỏi | Kết quả đo |
-| --- | --- |
-| Zalo Web có chạy trong app không | Có. `chat.zalo.me` → `id.zalo.me/account?continue=…`, QR render bình thường |
-| Có bị chặn "trình duyệt không hỗ trợ" | Không. UA của app đã bỏ token `Electron/` nên trông như Chrome |
-| Host phải cho load | `zalo.me` (chat + id) và CDN `zdn.vn`, `zadn.vn` — thiếu thì captcha và avatar mất |
-| `document.title` khi chưa login | `Zalo - Đăng nhập Zalo`, sau redirect là `Đăng nhập tài khoản Zalo` |
-
-**Chưa kiểm chứng — cần tài khoản đã login:** Zalo có ghi số chưa đọc vào `document.title`
-kiểu `(3) …` hay không. Badge unread đọc từ đó (`unreadFromTitle`), nên nếu Zalo không ghi
-thì tile Zalo trên rail sẽ **không bao giờ có số** dù có tin mới, và phải đọc số bằng cách
-khác (soi DOM riêng cho Zalo — không còn là "khai báo thêm một service" nữa).
-
-Đăng nhập Zalo là **quét QR bằng app trên điện thoại**, không phải mật khẩu.
-`surface` chỉ gồm `chat.zalo.me` + `id.zalo.me`: `zalo.me/<user>` là profile công khai,
-giữ trong app là lặp lại đúng bug link `facebook.com` từng làm app kẹt.
-
-Rule ẩn chrome nằm ở `Service.hideRules` (`Sources/Messenger/Services.swift`), riêng từng
-service vì DOM hai site khác nhau hoàn toàn:
-
-| Service | Ẩn | Selector |
-| --- | --- | --- |
-| Messenger | Thanh tab Home/Reels/Marketplace/Groups/Gaming | `[role="navigation"]:has(a[href^="/marketplace/"])` |
-| Messenger | Ô nhập tìm kiếm | `input[aria-label="Search Facebook"]` |
-| Messenger | Nút tròn kính lúp (wrapper của ô trên) | `*:has(> input[aria-label="Search Facebook"])` |
-| Messenger | Nút X typeahead (UI chết sau khi ẩn search) | `[role="button"][aria-label="Exit typeahead"]` |
-| Messenger | Nút Facebook menu (9 chấm) | `[role="button"][aria-label="Facebook menu"]` |
-| Instagram | Home | `a[href="/"]` |
-| Instagram | Reels | `a[href^="/reels/"]` |
-| Instagram | Explore | `a[href^="/explore/"]` |
-
-Giữ lại: danh sách hội thoại, `Search Messenger`, `New message`, `/direct/requests/`,
-link profile (path chứa username nên không hardcode được), Notifications, Your profile.
-
-**Ẩn CSS KHÔNG giảm memory** — DOM node vẫn tồn tại, React vẫn render và diff. Lợi ích thật
-là chặn lỡ tay click vào Reels/Explore/Marketplace, những surface load rất nặng vào cùng
-WebContent process.
-
-### Bốn cái bẫy selector đã gặp
-
-1. **`[role="navigation"]` trên facebook.com** — có 3 vùng: thanh tab, account controls, và
-   **thread list**. Ẩn hết là mất danh sách hội thoại.
-2. **`[role="navigation"]` trên instagram.com** — role đó là **chính panel danh sách hội
-   thoại** (dòng chat 362×72), không phải rail bên trái. Rail nằm ngoài nó.
-3. **`input[role="combobox"]`** — khớp cả ô `Search Messenger` của chính Messenger.
-4. **`[aria-label*="Facebook" i]`** — khớp cả **một tin nhắn**, vì nội dung tin nhắn cũng
-   được đưa vào `aria-label`.
-
-Vì vậy: ưu tiên nhận theo `href` (độc lập ngôn ngữ và độc lập tài khoản); chỉ khi không có
-href mới dùng **aria-label khớp chính xác** — khớp chính xác fail-safe, site đổi label thì
-không ẩn được (vô hại) chứ không ẩn nhầm thứ đang cần.
-
-### An toàn
-
-- **Self-check** — 8 giây sau khi load, đếm element khớp từng rule và log cảnh báo cho rule
-  nào khớp 0, kèm tên service.
-- **Kill switch** — `FBMESS_KEEP_FB_CHROME=1` tắt toàn bộ, không cần rebuild. Cũng là cách
-  chạy A/B để kiểm tra rule có phá layout chat không.
-
-## Tham chiếu env var
-
-Tất cả đều là knob để thử/đo, không cần rebuild. Mặc định là hành vi ship.
-
-| Env var | Mặc định | Tác dụng |
-| --- | --- | --- |
-| `FBMESS_SERVICES` | `messenger` | Danh sách kênh, phân cách bằng dấu phẩy. Id lạ bị bỏ |
-| `FBMESS_TOPOLOGY` | `tabs` | `tabs` = 1 cửa sổ đổi webview, `windows` = mỗi kênh 1 cửa sổ |
-| `FBMESS_URL` | theo service | Ghi đè URL khởi động. Chỉ nhận `https` + host trong `internalHosts` |
-| `FBMESS_KEEP_FB_CHROME` | *(tắt)* | `1` = không ẩn chrome. Cũng dùng để chạy A/B kiểm tra rule |
-| `FBMESS_DIAG` | *(tắt)* | `1` = bật probe chẩn đoán DOM ra stderr |
-| `FBMESS_MODE` | `baseline` | `baseline` / `throttle` / `suspend` / `block` — xem `docs/perf-process.md` |
-| `FBMESS_UA` | *(tắt)* | `mobile` hoặc chuỗi UA đầy đủ. **Đã đo: không có surface nhẹ hơn** |
-| `FBMESS_CONTENT_MODE` | `recommended` | `mobile` / `desktop`. **Đã đo: không cải thiện** |
-| `FBMESS_WINDOW` | `1100x760` | Kích thước cửa sổ, dạng `WxH`. Cửa sổ hẹp **không** giảm memory |
-| `FBMESS_BENCH_HIDE_AFTER` | `0` | Giây rồi tự ẩn cửa sổ — chỉ dùng cho `bench.sh` |
-
-Ba knob cuối cùng của phần đo hiệu năng đều cho kết quả **âm** và được giữ lại để không
-phải thử lại; số liệu ở `docs/perf-process.md`.
+Exit code là cổng, không phải dòng log. Mọi probe đi qua `runProbe` nên throw cũng thành
+`FAIL probe throw` + exit 1 chứ không treo.
 
 ## Script
 
 | Script | Việc |
 | --- | --- |
-| `./build.sh` | Build + selftest + đóng `.app` + ad-hoc sign. `RELEASE_TUNE=fast` để thử flag tối ưu |
-| `./measure.sh` | Đo memory/CPU, có `--watch` theo dõi liên tục |
-| `./bench.sh` | Bench theo giao thức cố định để so phương án |
-| `./startup.sh` | So thời gian khởi động giữa các mức tối ưu |
-| `sudo ./pressure-test.sh` | Simulate memory pressure để phân biệt cache với leak |
-| `./make-icon.sh` | Sinh `Resources/AppIcon.icns` từ `tools/make-icon.swift` |
-| `./preview-rail.sh` | Render rail ra PNG (light + dark) để xem thiết kế |
-| `./docs-check.sh` | Kiểm tra docs không lệch code: env var và script đều phải được nhắc |
-| `./freeze-sample.sh` | Chụp stack trace của WebContent **đúng lúc** nội dung đóng băng |
-| `./chrome-probe.sh` | Đo CPU của Chrome trên cùng trang, để so với WKWebView |
-| `./launch-chrome.sh` | Mở kênh chat trong Chrome app mode — Blink thật, 0 dòng code app |
-| `./build-electron.sh` | Build bản Electron thành `.app` + `.zip`. Xem `electron/README.md` |
+| `./build-electron.sh` | Build + selftest + cắt locale + ad-hoc sign + `.tar.xz` |
 | `./release-electron.sh` | Build rồi đẩy lên GitHub Release, tag `electron-b<số build>` |
 | `./install-electron.sh` | Cài bản Release mới nhất lên máy dùng. Không cần node |
+| `./measure.sh` | Đo memory/CPU gồm cả helper process, có `--watch` |
+| `./make-icon.sh` | Sinh `Resources/AppIcon.icns` từ `tools/make-icon.swift` |
+| `./docs-check.sh` | Kiểm docs không lệch code: env var và script đều phải được nhắc |
 
-## Đo hiệu năng — so với Franz
+## Icon
 
-```bash
-./measure.sh "FB Mess"                       # chụp 1 thời điểm
-./measure.sh "FB Mess" --watch               # theo dõi liên tục, ghi memory-track.csv
-INTERVAL=300 ./measure.sh "FB Mess" --watch  # 5 phút/mẫu
-```
+Bong bóng chat + **4 chấm 2×2** = 4 kênh. Thiết kế gốc — không dùng logo Messenger của Meta
+(trademark), không dùng SF Symbols (license cấm dùng làm app icon).
 
-Watch mode để trả lời câu snapshot không trả lời được: **memory phình lúc nào và process
-nào phình**. Nó tách riêng app / GPU / Networking / WebContent, đếm số WebContent, và in
-Δ so với mẫu đầu. Tự tra lại PID nếu app bị relaunch (và reset mốc Δ, vì process mới
-không so được với process cũ).
+- `tools/make-icon.swift` → `Resources/AppIcon.icns` (app icon, full màu)
+- `electron/make-tray-icon.js` → `electron/tray.png` (menu bar, template đơn sắc)
 
-Hai cột quan trọng:
+Hai file phải giữ cùng tỉ lệ; các phân số hình học ghi trong `make-tray-icon.js`.
+`tools/icon-balance.swift` đo centroid/bbox và vẽ đường gióng để kiểm cân bằng.
 
-- **RECLAIM** — trang OS lấy lại được **ngay** (clean/purgeable). **Không** tính phần cache
-  mà WebKit tự purge khi nhận notification memory pressure — mà chính phần đó tạo ra mức
-  giảm 42% trong `pressure-test.sh`. Nên **RECLAIM thấp không kết luận được là leak**: đo
-  thực tế thấy một máy ở 130/1270 MB (10%) mà vẫn plateau hoàn toàn, còn máy khác
-  351/585 MB (60%).
-- **PEAK** — mức cao nhất từ lúc process sinh ra (chỉ ở snapshot mode).
-
-Phân biệt cache với leak thì xem **đường có plateau không** (leak tăng đơn điệu, cache
-phẳng ra), rồi xác nhận bằng `pressure-test.sh`.
-
-Số lấy từ `/usr/bin/footprint --json`, đọc bằng `plutil` nên **chính xác tới byte** và
-không cần python. Bản trước parse text của `vmmap`, trên 1 GB nó in `"1.4G"` nên độ phân
-giải rơi xuống 100 MB — hai mẫu liên tiếp cùng đọc `1024.0 MB` từng che mất thay đổi thật.
-
-Số liệu nghiêm túc để so phương án thì dùng `./bench.sh` với giao thức cố định —
-xem `docs/perf-process.md`.
-
-Số đo thật sau khi login (`phys_footprint`, chính là số Activity Monitor hiện):
-
-| Trạng thái | Footprint | CPU |
-| --- | --- | --- |
-| Cửa sổ mở liên tục ~5 phút | ~990 MB | 8.5% |
-| Cửa sổ ẩn | ~650 MB | 5.2% |
-| Riêng shell Swift | 28 MB | 0.0% |
-
-**Con số đó là cache, không phải memory app cần giữ.** Đã kiểm chứng bằng
-`sudo ./pressure-test.sh` (simulate memory pressure, không cấp phát RAM thật):
-
-| Mốc | page | worker | Tổng |
-| --- | --- | --- | --- |
-| Trước | 651 MB | 161 MB | 891 MB |
-| Simulate WARN 30s | 625 MB | **bị kill** | 692 MB |
-| Simulate CRITICAL 20s | 586 MB | — | 653 MB |
-| Sau khi thả 20s | **450 MB** | respawn 10 MB | **516 MB** |
-
-Giảm **42%** khi hệ thống cần RAM, và tiếp tục giảm cả sau khi đã thả pressure. Trong một
-phiên khác nó tự tụt 918 → 610 MB sau ~10 phút idle mà không cần can thiệp gì.
-
-Nghĩa là: **không leak, không cần fix.** `WebKit Malloc` (chiếm phần lớn) là bmalloc —
-allocator có cache riêng, trả page về OS chậm rãi, và WebKit purge mạnh khi nhận
-notification memory pressure. Máy còn RAM thì nó không có lý do co lại.
-
-Hai điều **không** phải nguyên nhân, đã loại bằng đo:
-
-- *Webview không được giải phóng?* Không. Luôn đúng 2 WebContent process (1 page +
-  1 SharedWorker). Leak webview thì số process tích lũy.
-- *Engine kém với Facebook?* Không. Phần tăng nằm ở DOM + render tree + ảnh decode;
-  JS heap chỉ 20 MB. Memory-pressure handler của WebKit hoạt động đúng thiết kế.
-
-Ẩn cửa sổ thì ngăn memory tăng thêm nhưng không trả lại ngay trong vòng 1 phút — phần trả
-lại diễn ra chậm theo scavenger, hoặc tức thì khi có pressure.
-
-Lưu ý phụ: dưới pressure thật, SharedWorker của Messenger bị kill rồi respawn — kênh
-realtime khởi động lại nên notification có thể ngắt vài giây. Safari cũng vậy, không
-kiểm soát được từ phía app.
-
-96% memory là của web app Messenger — shell Swift chỉ 28 MB.
-
-Đừng dùng `ps` RSS để đánh giá: nó báo ~2.5 GB vì gộp cả vùng code framework dùng chung
-với Safari.
-
-## Đã cắt (YAGNI — thêm khi thật cần)
-
-- Multi-service (Zalo/Slack/Telegram) — chỉ Messenger
-- Multi-account
-- Tìm kiếm offline / lưu tin nhắn local — cần protocol access, approach này không có
-- App icon riêng — hiện dùng icon generic
-- Custom CSS ẩn story bar / suggested — selector của Messenger bị obfuscate, sẽ vỡ định kỳ
+Chi tiết quyết định: `plans/2026-08-06-icon-4-dots/design.md`.
 
 ## Hạn chế đã biết
 
-0. **E2EE: app là một thiết bị Messenger riêng biệt.** Hội thoại Messenger hiện mã hoá
-   đầu cuối (URL dạng `/e2ee/t/...`). Nội dung tin nhắn chỉ giải mã được từ store cục bộ
-   của từng thiết bị; server không giữ bản rõ. Hệ quả: app chỉ có lịch sử từ lúc bạn
-   đăng nhập vào nó trở đi. Thread cũ không có tin mới sẽ hiện **preview trống hoặc cũ**,
-   dù tên và avatar vẫn đúng (metadata đó lấy từ server). Đây là bản chất E2EE, không
-   phải bug, và không sửa được từ phía app wrapper.
+1. **E2EE: app là một thiết bị Messenger riêng.** Hội thoại mã hoá đầu-cuối chỉ giải mã được
+   từ store cục bộ của từng thiết bị; server không giữ bản rõ. Nên app chỉ có lịch sử từ lúc
+   bạn đăng nhập vào nó. Thread cũ không có tin mới sẽ hiện preview trống hoặc cũ, dù tên và
+   avatar vẫn đúng. Đây là bản chất E2EE, không phải bug.
+2. **Kênh tắt không báo tin.** Hệ quả trực tiếp của việc hủy view để trả RAM.
+3. **Badge Instagram/Threads/Zalo đọc `document.title`** — có thể không phản ánh đúng số DM.
+   Zalo đặc biệt chưa kiểm chứng được title có mang số hay không.
+4. **Notification khi app ẩn lâu chưa xác minh trên máy dùng thật.** Quyền đã gate theo
+   origin; nếu vỡ thì log `quyền BỊ TỪ CHỐI:` sẽ chỉ ra lý do.
+5. `⌘⇧M` có thể trùng hotkey app khác.
+6. Voice/video call chưa kiểm tra thực tế.
 
-   Điều này cũng loại hẳn hướng viết native protocol client: phải tự implement giao thức
-   E2EE của Meta, khó hơn nhiều lần so với giao thức plaintext cũ.
+## Vì sao Electron chứ không phải WKWebView
 
-1. **Autofill mật khẩu từ Keychain không hoạt động** trong `WKWebView`. Lần đầu phải nhập
-   hoặc paste tay.
-2. **Notification phụ thuộc `window.Notification`.** `WKWebView` không có Web Notifications
-   API nên app shim lại API này (`Sources/Messenger/Bridge.swift`). Nếu Messenger đổi sang
-   Service Worker Push thì shim không bắt được — lúc đó notification sẽ im lặng. Đây là
-   điểm dễ vỡ nhất của app.
-3. **RAM không thể xuống ~50 MB.** Muốn vậy phải viết native protocol client, đánh đổi bằng
-   rủi ro khoá tài khoản. Đã cân nhắc và loại.
-4. **Notification khi app ẩn lâu chưa được xác minh.** Mặc định (`baseline`) giữ assertion
-   chặn App Nap để kết nối realtime không bị throttle. Có 3 mode khác để thử nghiệm
-   (`FBMESS_MODE=throttle|suspend|block`) — xem `docs/perf-process.md`. Mode `throttle`
-   tốn ít CPU hơn rõ rệt nhưng **chưa chứng minh được là không làm chết kết nối**, nên
-   chưa đặt làm mặc định.
-5. `⌘⇧M` có thể trùng hotkey app khác. Sửa `kVK_ANSI_M` trong `main.swift:applicationDidFinishLaunching`.
-6. Voice/video call chưa kiểm tra thực tế (đã cấp quyền camera/mic trong `Info.plist` và
-   `requestMediaCapturePermissionFor`).
+Bản đầu viết bằng Swift + `WKWebView`. Nó bùng 60–100% CPU theo đợt làm nội dung đóng băng.
+`sample` trên một WebContent đang 100.7% CPU cho thấy thời gian nằm **toàn bộ ở layout của
+WebCore** (`computeVisibleRectsInContainer` 400 mẫu, `performFlexLayout` 229) — không một
+frame style-recalc nào, và spike vẫn xảy ra khi tắt hết CSS của app. Tức layout thrash nằm
+trong WebCore, không sửa được từ phía shell.
+
+Blink đo trên cùng trang: 0.91% trung bình qua 25.78 giờ.
+
+Bản Swift đã xoá. Source còn trong git history ở tag `swift-final` — cần khi muốn đọc lại
+store E2EE cũ ở `~/Library/WebKit/io.mobio.loind.fbmess`, vì store đó chỉ giải mã được từ
+app có đúng bundle ID đó:
+
+```bash
+git checkout swift-final -- Package.swift Sources/ Resources/Info.plist build.sh
+```
+
+Chi tiết quyết định và số liệu: `plans/2026-08-04-engine-decision/brainstorm.md`.
 
 ## Cấu trúc
 
 ```
-Sources/Messenger/
-  main.swift     AppDelegate, window, menu, notification bridge, navigation, recovery
-  Bridge.swift   JS inject: shim window.Notification → native UNUserNotificationCenter
-  Hotkey.swift   Global hotkey qua Carbon RegisterEventHotKey (không cần quyền Accessibility)
-Resources/Info.plist
-build.sh         build + selftest + bundle + ad-hoc sign
-measure.sh       đo RSS/CPU gồm cả helper process
+electron/            app: main.js, services.js, prefs.js, rail.html, preload, selftest
+tools/               make-icon.swift, icon-balance.swift (+ script dựng phương án icon)
+Resources/           AppIcon.icns
+docs/                ui-discipline, perf-process, decisions/
+plans/               brainstorm + plan từng tính năng
 ```

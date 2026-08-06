@@ -1,3 +1,7 @@
+> **Lưu ý:** các script trong tài liệu này (`bench.sh`, `startup.sh`, `pressure-test.sh`,
+> `build.sh`) đã xoá cùng bản Swift. Giữ lại vì đây là bản ghi số đo và giao thức đo —
+> phương pháp còn dùng được, tên script thì không.
+
 # Quy trình phân tích hiệu năng
 
 Quy trình 5 bước, lặp lại được, dùng cho mọi thay đổi liên quan hiệu năng của FB Mess.

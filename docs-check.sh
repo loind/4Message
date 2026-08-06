@@ -11,7 +11,12 @@ fail=0
 say() { printf '  %s\n' "$1"; }
 
 echo "── env var trong code mà docs chưa nhắc ──"
-for v in $(grep -rhoE 'FBMESS_[A-Z_]+' Sources/ | sort -u); do
+N=$(grep -rhoE 'FBMESS_[A-Z_]+' electron/ 2>/dev/null | sort -u | wc -l | tr -d ' ')
+if [ "${N:-0}" -eq 0 ]; then
+    say "HARNESS CHẾT: không tìm thấy env var nào trong electron/ — check này vô nghĩa"
+    exit 1
+fi
+for v in $(grep -rhoE 'FBMESS_[A-Z_]+' electron/ | sort -u); do
     grep -rq "$v" README.md docs/ 2>/dev/null || { say "THIẾU: $v"; fail=1; }
 done
 
@@ -21,9 +26,13 @@ for f in *.sh; do
     grep -rq "$f" README.md docs/ 2>/dev/null || { say "THIẾU: $f"; fail=1; }
 done
 
-echo "── docs nhắc env var không tồn tại trong code ──"
-for v in $(grep -rhoE 'FBMESS_[A-Z_]+' README.md docs/ 2>/dev/null | sort -u); do
-    grep -rq "$v" Sources/ || { say "docs nhắc nhưng code không có: $v"; fail=1; }
+echo "── README nhắc env var không tồn tại trong code ──"
+# Chỉ soi README.md ở chiều này, KHÔNG soi docs/ hay plans/: chúng là bản ghi thời điểm.
+# docs/perf-process.md ghi số đo của bản Swift nên nhắc FBMESS_MODE là đúng với lúc đó —
+# bắt chúng chỉ nhắc env var còn sống là bắt viết lại lịch sử. README thì phải luôn đúng
+# hiện tại, vì đó là thứ người dùng đọc để chạy app.
+for v in $(grep -rhoE 'FBMESS_[A-Z_]+' README.md 2>/dev/null | sort -u); do
+    grep -rq "$v" electron/ *.sh || { say "README nhắc nhưng code không có: $v"; fail=1; }
 done
 
 echo

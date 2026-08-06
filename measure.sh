@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Đo memory + CPU của app kể cả helper process.
 #
-#   ./measure.sh "FB Mess"                    # chụp 1 thời điểm
-#   ./measure.sh "FB Mess" --watch            # theo dõi liên tục, ghi CSV
-#   INTERVAL=300 ./measure.sh "FB Mess" --watch
+#   ./measure.sh 4Message                    # chụp 1 thời điểm
+#   ./measure.sh 4Message --watch            # theo dõi liên tục, ghi CSV
+#   INTERVAL=300 ./measure.sh 4Message --watch
 #
 # Nguồn số: `/usr/bin/footprint --json` → byte CHÍNH XÁC, đọc bằng `plutil` (luôn có
 # trên macOS, không cần python). Trước đây parse text của `vmmap`, nhưng trên 1 GB nó in
@@ -15,7 +15,7 @@
 #             WebKit tự purge khi nhận notification memory pressure — mà chính phần đó
 #             tạo ra mức giảm 42% trong pressure-test. Nên RECLAIM thấp KHÔNG kết luận
 #             được là leak. Muốn phân biệt cache với leak: xem đường có plateau không,
-#             và chạy `pressure-test.sh`.
+#             (script pressure-test.sh đã xoá cùng bản Swift; xem docs/perf-process.md).
 #   PEAK    — mức cao nhất từ lúc process sinh ra (chỉ ở snapshot mode).
 #
 # Không dùng RSS: bỏ qua trang đã bị nén nên báo thiếu (348 MB RSS cho process mà
@@ -27,7 +27,7 @@
 # lúc app launch" — hẹp hơn "trẻ hơn app", cái đó gom cả WebContent của Safari/Slack.
 set -uo pipefail
 
-APP="${1:?Cần tên app, ví dụ: ./measure.sh \"FB Mess\"}"
+APP="${1:-4Message}"   # mặc định app hiện tại; truyền tên khác nếu cần
 MODE="${2:-snapshot}"
 INTERVAL="${INTERVAL:-60}"
 CSV="${CSV:-memory-track.csv}"

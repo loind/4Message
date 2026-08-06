@@ -1,3 +1,7 @@
+> **Lưu ý:** phần preview rail nói tới `preview-rail.sh` và `RailView.swift` — cả hai đã xoá
+> cùng bản Swift. Bản Electron dùng `electron/preview-rail.js`. Các bẫy selector thì **vẫn
+> còn hiệu lực**: chúng nói về DOM của Meta, không về engine.
+
 # Kỷ luật UI: soi DOM và AppKit
 
 App này ẩn chrome của 3 web app do người khác viết, và dựng UI native quanh chúng. Cả hai

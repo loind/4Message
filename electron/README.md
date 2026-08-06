@@ -219,7 +219,7 @@ nhưng NGOÀI surface — nên chặn theo navigation là chặn luôn login. B�
 electron/
   main.js             process chính: window, rail, view mỗi kênh, tray, menu, link policy
   prefs.js            đọc/ghi prefs.json (kênh nào bật, rail có ẩn tay)
-  services.js         mirror của Sources/Messenger/Services.swift — url, surface, hideRules
+  services.js         nguồn duy nhất định nghĩa kênh — url, surface, hideRules
   rail.html           rail: tile màu bệt + glyph SVG đơn sắc
   rail-preload.js     bridge click tile → main
   service-preload.js  bắt click link, quyết định giữ trong app hay mở browser

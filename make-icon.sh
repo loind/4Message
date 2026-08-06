@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Sinh Resources/AppIcon.icns từ tools/make-icon.swift.
-# Chạy lại khi sửa thiết kế icon; build.sh tự gọi nếu thiếu file .icns.
+# Chạy lại khi sửa thiết kế icon; build-electron.sh tự gọi nếu thiếu file .icns.
 set -euo pipefail
 cd "$(dirname "$0")"
 
