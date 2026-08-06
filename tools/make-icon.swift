@@ -28,9 +28,8 @@ func roundedRect(_ rect: CGRect, _ radius: CGFloat) -> CGPath {
 }
 
 func drawIcon(in ctx: CGContext) {
-    let space = CGColorSpaceCreateDeviceRGB()
 
-    // ── Nền: squircle với gradient chéo ──
+    // ── Nền: squircle màu bệt (flat, không gradient) ──
     let inset: CGFloat = 84
     let plate = CGRect(x: inset, y: inset, width: canvas - inset * 2, height: canvas - inset * 2)
 
@@ -38,43 +37,32 @@ func drawIcon(in ctx: CGContext) {
     ctx.addPath(roundedRect(plate, 208))
     ctx.clip()
 
-    let bg = CGGradient(colorsSpace: space,
-                        colors: [rgb(72, 132, 255), rgb(139, 74, 246)] as CFArray,
-                        locations: [0, 1])!
-    ctx.drawLinearGradient(bg,
-                           start: CGPoint(x: inset, y: canvas - inset),
-                           end: CGPoint(x: canvas - inset, y: inset),
-                           options: [])
+    ctx.setFillColor(rgb(74, 132, 255)); ctx.fill(plate)
 
     // Highlight nhẹ góc trên cho đỡ phẳng.
-    let sheen = CGGradient(colorsSpace: space,
-                           colors: [rgb(255, 255, 255, 0.22), rgb(255, 255, 255, 0)] as CFArray,
-                           locations: [0, 1])!
-    ctx.drawRadialGradient(sheen,
-                           startCenter: CGPoint(x: 300, y: 880), startRadius: 0,
-                           endCenter: CGPoint(x: 300, y: 880), endRadius: 620,
-                           options: [])
     ctx.restoreGState()
 
     // ── Bong bóng chat ──
-    let bw: CGFloat = 566, bh: CGFloat = 396
+    let bw: CGFloat = 470, bh: CGFloat = 404
     let bx = (canvas - bw) / 2
-    let by = (canvas - bh) / 2 + 44
+    // nudge 35: điểm giữa hai nghiệm "bbox cân" (58) và "centroid cân" (12). Hai thước đo
+    // xung đột với hình có đuôi mảnh nên không thể cùng bằng 0 — xem
+    // plans/2026-08-06-icon-4-dots/design.md và tools/icon-balance.swift.
+    let by = (canvas - bh) / 2 + 35
     let bubble = CGRect(x: bx, y: by, width: bw, height: bh)
 
     let body = CGMutablePath()
-    body.addPath(roundedRect(bubble, 132))
+    body.addPath(roundedRect(bubble, 128))
 
     // Đuôi bong bóng chĩa xuống trái. Ngắn và dày — kéo dài + mảnh thì ra hình
     // swoosh chứ không đọc ra là đuôi.
+    // Bezier gốc, scale từ bubble 566×396 sang 470×404 — giữ đúng dáng đuôi nhọn cũ.
+    let sx = bw / 566, sy = bh / 396
+    func P(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: bx + x * sx, y: by + y * sy) }
     let tail = CGMutablePath()
-    tail.move(to: CGPoint(x: bx + 148, y: by + 64))
-    tail.addCurve(to: CGPoint(x: bx + 84, y: by - 112),
-                  control1: CGPoint(x: bx + 136, y: by - 24),
-                  control2: CGPoint(x: bx + 108, y: by - 74))
-    tail.addCurve(to: CGPoint(x: bx + 338, y: by + 44),
-                  control1: CGPoint(x: bx + 206, y: by - 52),
-                  control2: CGPoint(x: bx + 274, y: by + 34))
+    tail.move(to: P(148, 64))
+    tail.addCurve(to: P(84, -112), control1: P(136, -24), control2: P(108, -74))
+    tail.addCurve(to: P(338, 44), control1: P(206, -52), control2: P(274, 34))
     tail.closeSubpath()
     body.addPath(tail)
 
@@ -85,16 +73,23 @@ func drawIcon(in ctx: CGContext) {
     ctx.fillPath()
     ctx.restoreGState()
 
-    // ── Ba dấu chấm "đang nhập" ──
-    let dotR: CGFloat = 38
-    let gap: CGFloat = 134
-    let cy = by + bh / 2 + 12
-    for (i, tint) in [rgb(72, 132, 255), rgb(106, 103, 251), rgb(139, 74, 246)].enumerated() {
-        let cx = canvas / 2 + CGFloat(i - 1) * gap
-        ctx.setFillColor(tint)
+    // ── Bốn chấm 2×2 = 4 kênh ──
+    //
+    // 2×2 chứ KHÔNG phải hàng 4: đo ở 48px thì hàng 4 nhoè thành một vạch, vì thêm chấm
+    // thứ tư vào bề rộng cố định buộc bán kính co lại.
+    //
+    // Zalo dùng teal #12b3a8 thay màu thương hiệu #0068ff: plate và messenger đều là
+    // #4a84ff, thêm zalo xanh nữa thì ở 48px logo đọc ra 3 màu chứ không phải 4.
+    let dotR: CGFloat = 46
+    let gap: CGFloat = 132
+    let tints = [rgb(74, 132, 255), rgb(232, 65, 144), rgb(87, 87, 95), rgb(18, 179, 168)]
+    for row in 0..<2 { for col in 0..<2 {
+        let cx = bubble.midX + (CGFloat(col) - 0.5) * gap
+        let cy = bubble.midY + (0.5 - CGFloat(row)) * gap
+        ctx.setFillColor(tints[row * 2 + col])
         ctx.addEllipse(in: CGRect(x: cx - dotR, y: cy - dotR, width: dotR * 2, height: dotR * 2))
         ctx.fillPath()
-    }
+    } }
 }
 
 func render(size: Int) -> CGImage? {
