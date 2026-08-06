@@ -12,3 +12,4 @@ build-electron/
 4Message-*.tar.xz
 *.log
 /.json
+4Message-*.dmg

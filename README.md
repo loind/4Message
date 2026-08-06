@@ -34,6 +34,45 @@ Chi tiết từng bước và lý do thứ tự: `electron/README.md`.
 Máy dùng chỉ cần `gh` đã login — không cần `node`. Nếu có `node` thì
 `git pull && ./build-electron.sh` nhanh hơn và không phải tải 80 MB.
 
+## DMG
+
+```bash
+./build-dmg.sh               # → 4Message-arm64.dmg
+./build-dmg.sh --keep        # dùng .app đang có, không build lại
+```
+
+Mở DMG ra thấy app cạnh shortcut `Applications`, kéo sang là cài — cách cài quen thuộc trên
+macOS. DMG nặng hơn `.tar.xz` (112 MB vs 80 MB) vì `hdiutil` nén zlib chứ không phải lzma,
+nên `install-electron.sh` vẫn dùng `.tar.xz`.
+
+Bước sắp xếp vị trí icon và ảnh nền trong DMG cần **GUI session thật** (Finder automation).
+Máy build headless sẽ bỏ qua bước đó và vẫn ra DMG dùng được, chỉ thiếu phần trang trí.
+Đặt `build-icon/dmg-bg.png` nếu muốn có ảnh nền.
+
+## Vì sao vẫn bị hỏi "Open Anyway", và cần gì để hết
+
+Gatekeeper chỉ chặn file có cờ `com.apple.quarantine` — cờ đó do **browser** gắn khi tải.
+
+- `install-electron.sh` tải bằng `gh` → **không** có quarantine → app mở thẳng, không bị hỏi.
+- Tải bằng browser (kể cả DMG) → có quarantine → bị hỏi một lần.
+
+Cách xử lý ngay, miễn phí:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/4Message.app
+```
+
+Muốn **không bao giờ** bị hỏi thì phải ký bằng Developer ID rồi notarize, và điều đó bắt
+buộc có Apple Developer Program **$99/năm**:
+
+1. Certificate *Developer ID Application* (hiện repo này ký ad-hoc, `spctl` trả `rejected`)
+2. Ký với hardened runtime + secure timestamp
+3. `notarytool submit` rồi `stapler staple`
+
+Ký ad-hoc không bao giờ qua được Gatekeeper — đây là điều kiện của Apple, không phải thiếu
+sót cấu hình. `notarytool` và `stapler` đã có sẵn trên máy (Command Line Tools), nên khi có
+cert thì chỉ cần thêm bước vào `release-electron.sh`.
+
 ## Dùng
 
 | Thao tác | Kết quả |
@@ -121,6 +160,7 @@ Exit code là cổng, không phải dòng log. Mọi probe đi qua `runProbe` n�
 | `./build-electron.sh` | Build + selftest + cắt locale + ad-hoc sign + `.tar.xz` |
 | `./release-electron.sh` | Build rồi đẩy lên GitHub Release, tag `electron-b<số build>` |
 | `./install-electron.sh` | Cài bản Release mới nhất lên máy dùng. Không cần node |
+| `./build-dmg.sh` | Đóng `.app` thành DMG có shortcut Applications để kéo vào cài |
 | `./measure.sh` | Đo memory/CPU gồm cả helper process, có `--watch` |
 | `./make-icon.sh` | Sinh `Resources/AppIcon.icns` từ `tools/make-icon.swift` |
 | `./docs-check.sh` | Kiểm docs không lệch code: env var và script đều phải được nhắc |

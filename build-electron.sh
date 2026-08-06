@@ -54,7 +54,10 @@ find "$LOCALES" -maxdepth 1 -name '*.lproj' ! -name 'en.lproj' ! -name 'vi.lproj
   -exec rm -rf {} + 2>/dev/null || true
 
 # Ad-hoc sign: không sign thì Gatekeeper chặn và các entitlement (notification) im lặng fail.
-codesign --force --deep --sign - "$APP_NAME.app" 2>/dev/null || echo "cảnh báo: codesign fail"
+# ./ là bắt buộc: codesign hiểu đối số bắt đầu bằng chữ số là PID, nên "4Message.app"
+# trả "No such process" thay vì ký. Và KHÔNG chôn stderr — lỗi ký từng bị ẩn mất.
+codesign --force --deep --sign - "./$APP_NAME.app" || echo "cảnh báo: codesign fail"
+codesign --verify --deep --strict "./$APP_NAME.app" || echo "cảnh báo: signature không hợp lệ"
 
 # tar.xz thay vì zip: 70 MB so với 102 MB trên cùng bundle — nhị phân Chromium nén lzma
 # tốt hơn deflate rõ rệt. Giải nén bằng `tar -xJf`, bsdtar của macOS có liblzma sẵn nên máy
