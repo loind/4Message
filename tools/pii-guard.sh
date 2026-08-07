@@ -33,7 +33,7 @@ cookie-meta	(c_user=|xs=[A-Za-z0-9%]|datr=[A-Za-z0-9]|sessionid=[A-Za-z0-9]|ds_u
 token-key	(ghp_[A-Za-z0-9]{20}|github_pat_[A-Za-z0-9_]{20}|sk-[A-Za-z0-9]{20}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10}|AIza[0-9A-Za-z_-]{30})	ghp_aaaaaaaaaaaaaaaaaaaaaaaa
 private-key	-----BEGIN [A-Z ]*PRIVATE KEY	-----BEGIN RSA PRIVATE KEY-----
 jwt	eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}	eyJhbGciOiJIUzI1NiIsInR5.eyJzdWIiOiIwMDAwMDAwMDAw
-thread-id	(/e2ee/t/[0-9]+|/t/[0-9]{12,})	/e2ee/t/1234567890123456
+thread-id	/(e2ee/)?t/[0-9]{12,}	/e2ee/t/1234567890123456
 email	[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.(com|net|org|io|vn|me)	fixture@example.com
 home-path	/Users/[a-z0-9._-]+/	/Users/testuser/Downloads
 probe-dump	\[fbmess\] .*(state=\{|page=https)	[fbmess] [x] page=https://example.com/
