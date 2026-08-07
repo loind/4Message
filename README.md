@@ -184,6 +184,30 @@ Exit code là cổng, không phải dòng log. Mọi probe đi qua `runProbe` n�
 | `./measure.sh` | Đo memory/CPU gồm cả helper process, có `--watch` |
 | `./make-icon.sh` | Sinh `Resources/AppIcon.icns` từ `tools/make-icon.swift` |
 | `./docs-check.sh` | Kiểm docs không lệch code: env var và script đều phải được nhắc |
+| `tools/pii-guard.sh` | Chặn PII/secret. `--staged` (hook), `--tree` (gate publish), `--history` (audit) |
+
+## Chặn PII
+
+Repo này từng public kèm tên thật của ba người, username Instagram và thread ID E2EE — nằm
+trong file `.log` commit rồi xoá. Dọn tốn force-push, xoá tag, rồi xoá và tạo lại repo.
+
+Bật hook chặn tại chỗ (mỗi clone phải chạy một lần):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Gate thật nằm ở `release-electron.sh` — nó chạy `pii-guard.sh --tree` trước khi publish,
+**không phụ thuộc** hook có được cấu hình hay không. Đó là chỗ nội dung thật sự thành công
+khai.
+
+Audit toàn bộ history: `tools/pii-guard.sh --history`.
+
+Mỗi mẫu phải **khớp fixture của chính nó** trước khi quét; không khớp thì guard dừng với
+exit 2 thay vì âm thầm quét rỗng. Đây là phần quan trọng nhất của script: harness kiểm trong
+repo này đã hỏng 6 lần và lần nào cũng báo "sạch".
+
+False positive thì thêm regex vào `tools/pii-allow.txt` — mỗi dòng ở đó là một lỗ thủng.
 
 ## Icon
 
