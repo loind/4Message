@@ -1,13 +1,13 @@
-# FB Mess (Electron) — hướng dẫn build
+# 4Message — hướng dẫn build
 
-Bản dùng engine Blink của cùng app: Messenger + Instagram DM + Threads DM trong một cửa sổ,
+Messenger, Instagram DM, Threads và Zalo trong một cửa sổ,
 rail chọn kênh, ẩn chrome không liên quan tới chat, link ngoài surface mở browser, tray
 resident, ⌘⇧M bật/tắt cửa sổ, badge unread ở Dock + menu bar.
 
 Lý do tồn tại: WKWebView bùng 60–100% CPU theo đợt làm nội dung đóng băng — `sample` cho
 thấy thời gian nằm hết ở layout của WebCore, không phải CSS của app và không phải memory
-pressure. Đo cùng trang Messenger, Blink trung bình 0.58% qua 14 giờ. Chi tiết:
-`plans/2026-08-03-engine-swap/`.
+pressure. Đo cùng trang Messenger, Blink trung bình 0.91% qua 25.78 giờ. Chi tiết:
+`plans/2026-08-03-engine-swap/` và `plans/2026-08-04-engine-decision/`.
 
 ## Yêu cầu
 
@@ -94,11 +94,10 @@ Qua GitHub Release — máy đích không cần `node`, chỉ cần `gh`:
 ./install-electron.sh        # tải release mới nhất, quit app cũ, cài, mở lại
 ```
 
-Số build = `git rev-list --count HEAD`, cùng scheme với `CFBundleVersion` của bản Swift, nên
-"đang ở build mấy" nói được cho cả hai bản. Một commit = một release; release lại cùng commit
-bị chặn.
+Số build = `git rev-list --count HEAD`: đơn điệu tăng và tra được về đúng một commit. Một
+commit = một release; release lại cùng commit bị chặn.
 
-**Không commit `.zip` vào repo.** Nó 114 MB mà GitHub chặn cứng push file > 100 MB, và mỗi
+**Không commit DMG vào repo.** Nó 112 MB mà GitHub chặn cứng push file > 100 MB, và mỗi
 bản build sẽ nằm vĩnh viễn trong git history. Release asset không vào history, giới hạn 2 GB.
 
 Artifact là `.dmg`. `install-electron.sh` mount nó vào thư mục tạm (`-mountpoint` +
@@ -112,7 +111,7 @@ phải cờ Gatekeeper. Đã kiểm chứng bằng một lần tải thật 1.02
 
 ### Cách khác: build ngay trên máy dùng
 
-Nếu máy dùng có `node` thì khỏi cần tải 114 MB:
+Nếu máy dùng có `node` thì khỏi cần tải 112 MB:
 
 ```bash
 git pull --ff-only && ./build-electron.sh
@@ -123,14 +122,23 @@ quarantine. Đánh đổi: máy dùng phải có toolchain.
 
 ## Kiểm tra
 
-Bốn cách, không cái nào cần nhìn màn hình:
+Không cái nào cần nhìn màn hình:
 
 ```bash
-node electron/selftest.js                                     # logic surface/unread thuần
-./4Message.app/Contents/MacOS/4Message --version   # commit + electron + chromium
-./4Message.app/Contents/MacOS/4Message --probe     # wiring thật, cần mạng
+node electron/selftest.js                                # logic thuần, là cổng build
+./4Message.app/Contents/MacOS/4Message --version         # commit + electron + chromium
+./4Message.app/Contents/MacOS/4Message --probe           # rail, link policy, tray icon
+./4Message.app/Contents/MacOS/4Message --probe-toggle    # bật/tắt kênh, process chết thật
+./4Message.app/Contents/MacOS/4Message --probe-prefs     # trạng thái đọc lại được
 cd electron && ./node_modules/.bin/electron preview-rail.js /tmp/rail   # rail ra PNG
 ```
+
+**Thứ tự bắt buộc** với ba probe mode: `--probe` → `--probe-toggle` → `--probe-prefs`, liên
+tiếp. `--probe` và `--probe-toggle` đều reset `prefs.json`; chèn `--probe` vào giữa hai lệnh
+cuối làm `--probe-prefs` fail oan, đọc y hệt một lỗi persistence thật.
+
+Exit code là cổng, không phải dòng log. Mọi probe đi qua `runProbe` nên throw cũng thành
+`FAIL probe throw` + exit 1 chứ không treo.
 
 `--probe` in ra số tile của rail, URL + title + trạng thái login của từng kênh, và hai case
 link policy (link ngoài phải ra browser, link surface phải giữ trong app). Tự thoát sau ~25s.
@@ -160,7 +168,7 @@ desktop trống, không soi bằng mắt được.
 
 | Thao tác | Kết quả |
 | --- | --- |
-| Click tile trên rail / ⌘1 ⌘2 ⌘3 | Đổi kênh |
+| Click tile trên rail / ⌘1–⌘4 | Đổi kênh |
 | `⌘0` | Ẩn/hiện cột kênh. Nhớ qua lần chạy sau |
 | Menu **Kênh** | Bật/tắt từng kênh. Tắt là hủy view — **kênh tắt không báo tin nữa** |
 | `⌘⇧M` | Hiện/ẩn cửa sổ (global) |
@@ -169,12 +177,11 @@ desktop trống, không soi bằng mắt được.
 | `⌘R` | Tải lại |
 | `⌘W` / nút đóng | **Ẩn** cửa sổ, app vẫn chạy → lần sau mở tức thì |
 | `⌘Q` | Thoát thật |
-| Badge Dock + số cạnh icon menu bar | Tổng tin chưa đọc của cả ba kênh |
+| Badge Dock + số cạnh icon menu bar | Tổng tin chưa đọc của các kênh đang bật |
 
-## Session tách riêng với bản Swift
+## Session
 
-Store ở `~/Library/Application Support/4Message/`, không phải `~/Library/WebKit/`.
-Cookie KHÔNG chuyển sang được → phải login lại cả ba kênh. Mỗi lần login là một device
+Store ở `~/Library/Application Support/4Message/`. Mỗi kênh phải đăng nhập một lần. Mỗi lần login là một device
 E2EE mới, nên hội thoại mã hoá đầu-cuối sẽ không có lịch sử cũ ở app này.
 
 Đổi `productName` trong `electron/package.json` cũng đổi đường dẫn store → mất session.
@@ -195,28 +202,8 @@ Trạng thái ở `~/Library/Application Support/4Message/prefs.json`. File hỏ
 → về mặc định (bật tất cả), không crash. `FBMESS_SERVICES` vẫn là vũ trụ kênh khả dụng;
 prefs chỉ bật/tắt trong đó.
 
-Kiểm không cần nhìn màn hình:
-
-```bash
-./4Message.app/Contents/MacOS/4Message --probe-toggle   # tắt 3 kênh, chứng minh process chết
-./4Message.app/Contents/MacOS/4Message --probe-prefs    # in trạng thái đã lưu
-```
-
-## Khác biệt so với bản Swift
-
-| Việc | Swift | Electron |
-| --- | --- | --- |
-| Web Notification | shim JS → `UNUserNotificationCenter` | Blink hiện native, chỉ cần cấp quyền |
-| Chặn link | `navigationType == .linkActivated` | click capture trong preload |
-| Hotkey | Carbon `RegisterEventHotKey` | `globalShortcut` |
-| Thu gọn rail (⌘0) | có | có |
-| `FBMESS_TOPOLOGY` / `MODE` / `UA` / `WINDOW` | có (knob để đo) | không port — đều đã đo ra kết quả âm |
-
-**Chặn link phải ở tầng CLICK, không phải navigation.** `will-navigate` không phân biệt được
-click với redirect, mà luồng login của Meta đi qua `login.php` / `accounts/login` — internal
-nhưng NGOÀI surface — nên chặn theo navigation là chặn luôn login. Bản Swift có
-`navigationType == .linkActivated`; Electron không có field tương đương nên preload bắt click
-ở capture phase.
+Kiểm bằng `--probe-toggle` và `--probe-prefs` — xem mục **Kiểm tra** ở trên, kèm ràng buộc
+thứ tự chạy.
 
 ## File
 
