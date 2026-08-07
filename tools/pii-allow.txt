@@ -1,0 +1,6 @@
+# Regex, một dòng một mẫu. Dòng nội dung khớp bất kỳ mẫu nào ở đây sẽ được bỏ qua.
+# Mỗi dòng ở đây là một lỗ thủng — chỉ thêm khi CHẮC CHẮN là false positive.
+
+# Địa chỉ noreply trong trailer commit, không phải PII
+noreply@anthropic\.com
+@users\.noreply\.github\.com

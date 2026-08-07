@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Chặn PII/secret trước khi vào history. Bật hook cho repo này:
+#   git config core.hooksPath .githooks
+#
+# Hook KHÔNG theo clone: repo mới clone phải chạy lệnh trên. Vì vậy gate thật nằm ở
+# release-electron.sh — nó luôn chạy trước khi publish, không phụ thuộc cấu hình máy.
+exec tools/pii-guard.sh --staged

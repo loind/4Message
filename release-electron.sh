@@ -18,6 +18,10 @@ gh auth status >/dev/null 2>&1 || { echo "gh chưa login: gh auth login"; exit 1
 # không ai biết nó là code nào.
 [ -z "$(git status --porcelain)" ] || { echo "cây làm việc còn thay đổi chưa commit"; exit 1; }
 
+# Gate PII: đây là điểm nội dung thành CÔNG KHAI. Hook pre-commit không theo clone nên
+# không tin được là nó đã chạy; chỗ này thì luôn chạy.
+./tools/pii-guard.sh --tree || { echo "release bị chặn vì pii-guard"; exit 1; }
+
 BUILD=$(git rev-list --count HEAD)
 COMMIT=$(git rev-parse --short HEAD)
 TAG="electron-b$BUILD"
