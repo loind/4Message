@@ -31,6 +31,15 @@ if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   exit 1
 fi
 
+# Mỗi bản phát hành phải có changelog. Gate ở đây chứ không nhắc suông: mục changelog viết
+# sau khi release xong thì không bao giờ được viết.
+head -n 20 CHANGELOG.md | grep -q "^## b$BUILD\b" || {
+  echo "CHANGELOG.md thiếu mục '## b$BUILD' ở đầu file — viết changelog rồi release lại"
+  exit 1
+}
+# Mục trên cùng (từ '## ' đầu tiên đến trước '## ' kế tiếp) thành release notes.
+CHANGES=$(awk '/^## /{n++} n==1' CHANGELOG.md)
+
 ./build-electron.sh
 ./build-dmg.sh --keep
 
@@ -38,6 +47,8 @@ ELECTRON_VER=$(node -p "require('./electron/package.json').devDependencies.elect
 gh release create "$TAG" "$APP_NAME-arm64.dmg" --repo "$REPO" \
   --title "Electron build $BUILD" \
   --notes "commit \`$COMMIT\` · electron $ELECTRON_VER · arm64
+
+$CHANGES
 
 ## Cài
 

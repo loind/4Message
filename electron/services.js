@@ -27,6 +27,10 @@ const SERVICES = [
       { host: 'messenger.com' },
       { host: 'm.me' },
     ],
+    // Badge phải đọc theo luật riêng của facebook.com — xem messengerUnread(). Cờ này gắn
+    // với SURFACE, không với kênh: đổi url về messenger.com thì bỏ nó đi, title bên đó chỉ
+    // đếm tin nhắn nên unreadFromTitle dùng thẳng được.
+    unreadRule: 'facebook',
     hideRules: [
       ['tab bar', '[role="navigation"]:has(a[href^="/marketplace/"])'],
       ['search input', 'input[aria-label="Search Facebook"]'],
@@ -146,7 +150,12 @@ function resolveServices (raw) {
   return picked.length ? picked : SERVICES.slice()
 }
 
-/** Số chưa đọc từ đầu document.title: `"(3) Chats · Messenger"` → `"3"`. */
+/**
+ * Số chưa đọc từ đầu document.title: `"(3) Chats · Messenger"` → `"3"`.
+ *
+ * Đúng cho messenger.com / instagram.com — nơi title chỉ đếm tin nhắn. KHÔNG đúng cho
+ * facebook.com: xem messengerUnread().
+ */
 function unreadFromTitle (title) {
   if (!title || !title.startsWith('(')) return null
   const close = title.indexOf(')')
@@ -154,6 +163,39 @@ function unreadFromTitle (title) {
   const inner = title.slice(1, close)
   if (!inner || !/^\d[\d+]*$/.test(inner)) return null
   return inner
+}
+
+/**
+ * Số tin nhắn chưa đọc trên surface `facebook.com/messages`. Đo trên tài khoản thật
+ * 2026-08-07, cả hai cái bẫy dưới đây đều bắt được trong log:
+ *
+ * 1. `(N)` trong title facebook.com là TỔNG badge toàn site — tin nhắn CỘNG thông báo. Một
+ *    thông báo fanpage cũng đẩy title lên `(1)`, đúng lúc nút chuông mang text "Number of
+ *    unread notifications". Nên phải trừ số của chuông ra, không thì badge app báo tin nhắn
+ *    trong khi chỉ có ai đó comment.
+ * 2. Facebook nhấp nháy title mỗi 2 giây sang `"Ai đó messaged you"` rồi quay lại. Dạng đó
+ *    KHÔNG mang số; đọc thẳng thì badge chớp N→0→N→0 suốt thời gian còn tin chưa đọc. Nó
+ *    nghĩa là "chưa biết" chứ không phải "đã đọc hết" — chỉ title nghỉ (`"Messenger |
+ *    Facebook"`) mới là bằng chứng hết tin.
+ *
+ * `notifCount < 0` = không đọc được chuông → KHÔNG trừ. Badge cao hơn thực còn hơn nuốt mất
+ * tin nhắn: báo tin là lý do app tồn tại.
+ *
+ * @param {string} title document.title hiện tại
+ * @param {number} notifCount số trên chuông thông báo, `-1` nếu không đọc được
+ * @param {string|null} prev giá trị badge đang giữ, dùng khi title không kết luận được
+ */
+function messengerUnread (title, notifCount, prev) {
+  const total = unreadFromTitle(title)
+  if (total === null) {
+    // Chỉ dạng flash mới được giữ giá trị cũ. Mọi title khác (kể cả title nghỉ) là bằng
+    // chứng đã đọc hết — nhận nhầm ở đây thì badge kẹt số cũ vĩnh viễn.
+    return / messaged /i.test(title || '') ? (prev ?? null) : null
+  }
+  // `"9+"` không phải số đếm được, trừ đi cũng vô nghĩa — để nguyên.
+  if (!/^\d+$/.test(total)) return total
+  const n = parseInt(total, 10) - (notifCount > 0 ? notifCount : 0)
+  return n > 0 ? String(n) : null
 }
 
 /**
@@ -177,4 +219,4 @@ function railVisible (enabledCount, collapsed) {
   return enabledCount > 1 && !collapsed
 }
 
-module.exports = { SERVICES, INTERNAL_HOSTS, isInternal, isSurface, resolveServices, unreadFromTitle, resolveEnabled, railVisible }
+module.exports = { SERVICES, INTERNAL_HOSTS, isInternal, isSurface, resolveServices, unreadFromTitle, messengerUnread, resolveEnabled, railVisible }

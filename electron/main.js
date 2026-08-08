@@ -12,7 +12,8 @@ const {
 const path = require('path')
 const fs = require('fs')
 const {
-  SERVICES, isInternal, isSurface, resolveServices, unreadFromTitle, resolveEnabled, railVisible,
+  SERVICES, isInternal, isSurface, resolveServices, unreadFromTitle, messengerUnread,
+  resolveEnabled, railVisible,
 } = require('./services')
 const { loadPrefs, savePrefs } = require('./prefs')
 
@@ -237,6 +238,28 @@ function updateBadge () {
   if (win && rt) win.setTitle(rt.service.title + (rt.unread ? `  (${rt.unread})` : ''))
 }
 
+// Số trên chuông thông báo của facebook.com. Facebook phơi nó ra dạng text cho screen
+// reader ("Number of unread notifications: 3") — đo 2026-08-07.
+//
+// aria-label khớp CHÍNH XÁC, không `*=`: `[aria-label*="Notification" i]` trúng cả nút
+// "Manage <tên> notification settings" trong panel, và trúng cả nội dung tin nhắn — bẫy đã
+// ghi trong docs/ui-discipline.md.
+//
+// Duyệt HẾT chứ không querySelector: trang có HAI element mang đúng nhãn này, cái đầu tiên
+// innerText rỗng, chỉ cái sau mang số. Lấy cái đầu thì luôn đọc ra 0 và badge không bao giờ
+// được trừ.
+const NOTIF_COUNT_JS = `(() => {
+  const els = [...document.querySelectorAll('[aria-label="Notifications"]')]
+  if (!els.length) return -1
+  for (const e of els) {
+    const t = (e.innerText || '').trim()
+    if (!t) continue
+    const m = t.match(/\\d+/)
+    return m ? parseInt(m[0], 10) : 1
+  }
+  return 0
+})()`
+
 function makeServiceView (service) {
   const view = new WebContentsView({
     webPreferences: {
@@ -253,9 +276,28 @@ function makeServiceView (service) {
   wc.on('page-title-updated', (_e, title) => {
     const rt = runtimes.find(r => r.view === view)
     if (!rt) return
-    rt.unread = unreadFromTitle(title)
-    pushRailState()
-    updateBadge()
+    if (service.unreadRule !== 'facebook') {
+      rt.unread = unreadFromTitle(title)
+      pushRailState()
+      updateBadge()
+      return
+    }
+    // Chỉ hỏi DOM khi title thật sự mang số: dạng flash lặp 2 giây/lần chiếm đa số các lần
+    // title đổi, hỏi chuông ở đó vừa vô ích vừa tốn một lượt executeJavaScript.
+    //
+    // Kết quả về sau vài ms. Title đổi tiếp trong lúc chờ thì lần cập nhật sau ghi đè —
+    // badge lệch nhiều nhất một nhịp, không kẹt sai, nên không cần khoá thứ tự.
+    const p = unreadFromTitle(title) === null
+      ? Promise.resolve(0)
+      : wc.executeJavaScript(NOTIF_COUNT_JS).catch(() => -1)
+    p.then((notif) => {
+      // Đọc lại runtime: kênh có thể đã bị tắt trong lúc chờ, `rt` khi đó trỏ vào view chết.
+      const cur = runtimes.find(r => r.view === view)
+      if (!cur) return
+      cur.unread = messengerUnread(title, notif, cur.unread)
+      pushRailState()
+      updateBadge()
+    })
   })
 
   wc.on('did-finish-load', async () => {
