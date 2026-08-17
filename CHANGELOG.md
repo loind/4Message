@@ -4,6 +4,26 @@ Mỗi bản phát hành là một GitHub Release `electron-b<số build>`, số 
 (`git rev-list --count HEAD`). `release-electron.sh` lấy mục trên cùng của file này làm
 release notes, nên **viết mục mới trước khi release**.
 
+## b74 — 2026-08-08
+
+### Sửa
+
+- **Badge không còn biến mất khi đang có tin chưa đọc.** b73 trừ số thông báo Facebook khỏi
+  số trong title, nhưng title **chỉ đếm tin nhắn** — phép trừ đó cho kết quả âm và xoá sạch
+  badge. Ai có nhiều thông báo chưa xem thì gần như không bao giờ thấy badge tin nhắn nữa.
+
+  Đo 2026-08-08: title `"(1) Messenger | Facebook"` trong khi chuông mang **6** thông báo và
+  thread list có đúng **1** dòng `"Unread message"`. Nếu title gộp thông báo thì nó đã phải
+  là `(7)`. Kết luận của b73 dựa trên ba mẫu đo, trong đó lần title `(1)` tình cờ trùng lúc
+  chuông có số — trùng hợp bị đọc thành nhân quả.
+
+  Nay bỏ hẳn phép trừ, không còn đọc DOM nút chuông nữa.
+
+### Giữ nguyên từ b73
+
+- Badge vẫn không chớp tắt: title flash `"Ai đó messaged you"` vẫn được hiểu là "chưa biết"
+  thay vì "đã đọc hết". Phần này đo bằng log title thật và vẫn đúng.
+
 ## b73 — 2026-08-08
 
 ### Sửa

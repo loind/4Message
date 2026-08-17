@@ -166,36 +166,30 @@ function unreadFromTitle (title) {
 }
 
 /**
- * Số tin nhắn chưa đọc trên surface `facebook.com/messages`. Đo trên tài khoản thật
- * 2026-08-07, cả hai cái bẫy dưới đây đều bắt được trong log:
+ * Số tin nhắn chưa đọc trên surface `facebook.com/messages`.
  *
- * 1. `(N)` trong title facebook.com là TỔNG badge toàn site — tin nhắn CỘNG thông báo. Một
- *    thông báo fanpage cũng đẩy title lên `(1)`, đúng lúc nút chuông mang text "Number of
- *    unread notifications". Nên phải trừ số của chuông ra, không thì badge app báo tin nhắn
- *    trong khi chỉ có ai đó comment.
- * 2. Facebook nhấp nháy title mỗi 2 giây sang `"Ai đó messaged you"` rồi quay lại. Dạng đó
- *    KHÔNG mang số; đọc thẳng thì badge chớp N→0→N→0 suốt thời gian còn tin chưa đọc. Nó
- *    nghĩa là "chưa biết" chứ không phải "đã đọc hết" — chỉ title nghỉ (`"Messenger |
- *    Facebook"`) mới là bằng chứng hết tin.
+ * `(N)` trong title CHỈ đếm tin nhắn, không cộng thông báo Facebook — đo 2026-08-08: title
+ * `"(1) Messenger | Facebook"` trong khi chuông mang 6 thông báo và thread list có đúng 1
+ * dòng "Unread message". Cộng vào thì title đã phải là `(7)`.
  *
- * `notifCount < 0` = không đọc được chuông → KHÔNG trừ. Badge cao hơn thực còn hơn nuốt mất
- * tin nhắn: báo tin là lý do app tồn tại.
+ * b73 từng trừ số chuông khỏi `(N)` vì đọc nhầm một trùng hợp trong 3 mẫu đo thành nhân
+ * quả, làm badge ra âm rồi biến mất trong khi vẫn còn tin chưa đọc. Đừng lặp: muốn khẳng
+ * định title gộp thêm thứ gì thì phải bắt được ca title tăng KHI CHỈ có thứ đó thay đổi.
+ *
+ * Cái title thật sự bẫy là chỗ khác: Facebook nhấp nháy title mỗi 2 giây sang
+ * `"Ai đó messaged you"` rồi quay lại. Dạng đó không mang số; đọc thẳng thì badge chớp
+ * N→0→N→0 suốt thời gian còn tin chưa đọc. Nó nghĩa là "chưa biết", không phải "đã đọc
+ * hết" — chỉ title nghỉ (`"Messenger | Facebook"`) mới là bằng chứng hết tin.
  *
  * @param {string} title document.title hiện tại
- * @param {number} notifCount số trên chuông thông báo, `-1` nếu không đọc được
  * @param {string|null} prev giá trị badge đang giữ, dùng khi title không kết luận được
  */
-function messengerUnread (title, notifCount, prev) {
+function messengerUnread (title, prev) {
   const total = unreadFromTitle(title)
-  if (total === null) {
-    // Chỉ dạng flash mới được giữ giá trị cũ. Mọi title khác (kể cả title nghỉ) là bằng
-    // chứng đã đọc hết — nhận nhầm ở đây thì badge kẹt số cũ vĩnh viễn.
-    return / messaged /i.test(title || '') ? (prev ?? null) : null
-  }
-  // `"9+"` không phải số đếm được, trừ đi cũng vô nghĩa — để nguyên.
-  if (!/^\d+$/.test(total)) return total
-  const n = parseInt(total, 10) - (notifCount > 0 ? notifCount : 0)
-  return n > 0 ? String(n) : null
+  // Chỉ dạng flash mới được giữ giá trị cũ. Mọi title khác (kể cả title nghỉ) là bằng chứng
+  // đã đọc hết — nhận nhầm ở đây thì badge kẹt số cũ vĩnh viễn.
+  if (total === null) return / messaged /i.test(title || '') ? (prev ?? null) : null
+  return total
 }
 
 /**

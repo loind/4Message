@@ -54,25 +54,19 @@ assert.strictEqual(unreadFromTitle('(hi) x'), null)
 // log đo 2026-08-07 (chỉ thay tên người bằng tên giả — log thật chứa PII, không đưa vào
 // repo). Định dạng mới là thứ hàm dựa vào, không phải nội dung tên.
 //
-// `(N)` của facebook.com là tổng tin nhắn + thông báo: trừ số trên chuông ra.
-assert.strictEqual(messengerUnread('(3) Messenger | Facebook', 1, null), '2')
-// Chỉ có thông báo, không có tin nhắn nào — đúng ca người dùng báo (thông báo fanpage).
-assert.strictEqual(messengerUnread('(1) Messenger | Facebook', 1, null), null)
-// Không đọc được chuông thì KHÔNG trừ: nuốt mất tin nhắn tệ hơn badge cao hơn thực.
-assert.strictEqual(messengerUnread('(2) Messenger | Facebook', -1, null), '2')
-assert.strictEqual(messengerUnread('(2) Messenger | Facebook', 0, null), '2')
-// Trừ quá tay không được ra số âm.
-assert.strictEqual(messengerUnread('(1) Messenger | Facebook', 5, null), null)
+// `(N)` chỉ đếm TIN NHẮN. b73 từng trừ số chuông thông báo khỏi đây và badge ra âm rồi
+// biến mất trong khi vẫn còn tin chưa đọc — regression đắt nhất của tính năng này.
+assert.strictEqual(messengerUnread('(3) Messenger | Facebook', null), '3')
+assert.strictEqual(messengerUnread('(1) Messenger | Facebook', null), '1')
 // Title flash 2 giây/lần: không mang số, phải GIỮ badge — đọc thành 0 là bug chớp tắt.
-assert.strictEqual(messengerUnread('Minh messaged you', 0, '2'), '2')
-assert.strictEqual(messengerUnread('Lan messaged Nhóm bạn thân', 0, '2'), '2')
+assert.strictEqual(messengerUnread('Minh messaged you', '2'), '2')
+assert.strictEqual(messengerUnread('Lan messaged Nhóm bạn thân', '2'), '2')
 // Nhưng title nghỉ mới là bằng chứng đã đọc hết — nhận nhầm thì badge kẹt số cũ vĩnh viễn.
-assert.strictEqual(messengerUnread('Messenger | Facebook', 0, '2'), null)
-assert.strictEqual(messengerUnread('Messenger', 0, '2'), null)
+assert.strictEqual(messengerUnread('Messenger | Facebook', '2'), null)
+assert.strictEqual(messengerUnread('Messenger', '2'), null)
 // prev chưa có gì thì flash cũng không dựng badge từ hư không.
-assert.strictEqual(messengerUnread('Minh messaged you', 0, null), null)
-// "9+" không trừ được, để nguyên.
-assert.strictEqual(messengerUnread('(9+) Messenger | Facebook', 3, null), '9+')
+assert.strictEqual(messengerUnread('Minh messaged you', null), null)
+assert.strictEqual(messengerUnread('(9+) Messenger | Facebook', null), '9+')
 
 assert.deepStrictEqual(resolveServices('threads,messenger').map(s => s.id), ['threads', 'messenger'])
 assert.deepStrictEqual(resolveServices('nope').map(s => s.id), SERVICES.map(s => s.id))
