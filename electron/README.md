@@ -130,12 +130,18 @@ node electron/selftest.js                                # logic thuần, là c�
 ./4Message.app/Contents/MacOS/4Message --probe           # rail, link policy, tray icon
 ./4Message.app/Contents/MacOS/4Message --probe-toggle    # bật/tắt kênh, process chết thật
 ./4Message.app/Contents/MacOS/4Message --probe-prefs     # trạng thái đọc lại được
+./4Message.app/Contents/MacOS/4Message --probe-image     # menu chuột phải trên ảnh
 cd electron && ./node_modules/.bin/electron preview-rail.js /tmp/rail   # rail ra PNG
 ```
 
 **Thứ tự bắt buộc** với ba probe mode: `--probe` → `--probe-toggle` → `--probe-prefs`, liên
 tiếp. `--probe` và `--probe-toggle` đều reset `prefs.json`; chèn `--probe` vào giữa hai lệnh
 cuối làm `--probe-prefs` fail oan, đọc y hệt một lỗi persistence thật.
+
+`--probe-image` **không** thuộc ràng buộc trên: nó không đụng `prefs.json`. Nhưng nó chạy trên
+`userData` **thật** (cần session đăng nhập mới đo được ảnh chat) nên phải **thoát app trước**;
+nó cướp focus vì `sendInputEvent` đòi cửa sổ đang focused, và **ghi đè clipboard** vì có assert
+kiểm copy ra tận bitmap.
 
 Exit code là cổng, không phải dòng log. Mọi probe đi qua `runProbe` nên throw cũng thành
 `FAIL probe throw` + exit 1 chứ không treo.
@@ -177,6 +183,7 @@ desktop trống, không soi bằng mắt được.
 | `⌘R` | Tải lại |
 | `⌘W` / nút đóng | **Ẩn** cửa sổ, app vẫn chạy → lần sau mở tức thì |
 | `⌘Q` | Thoát thật |
+| Chuột phải vào ảnh | **Copy ảnh** / **Lưu ảnh…** (Save panel, mặc định `~/Downloads`) |
 | Badge Dock + số cạnh icon menu bar | Tổng tin chưa đọc của các kênh đang bật |
 
 ## Session
@@ -212,9 +219,11 @@ electron/
   main.js             process chính: window, rail, view mỗi kênh, tray, menu, link policy
   prefs.js            đọc/ghi prefs.json (kênh nào bật, rail có ẩn tay)
   services.js         nguồn duy nhất định nghĩa kênh — url, surface, hideRules
+  image-menu.js       luật menu chuột phải trên ảnh — dựng hay không, lưu được không, tên file
   rail.html           rail: tile màu bệt + glyph SVG đơn sắc
   rail-preload.js     bridge click tile → main
-  service-preload.js  bắt click link, quyết định giữ trong app hay mở browser
+  service-preload.js  bắt click link (giữ trong app hay mở browser) + bịt menu chuột phải
+                      của trang khi trỏ vào ảnh
   selftest.js         cổng build — logic surface/unread, không cần GUI/mạng
   preview-rail.js     render rail.html ra PNG, 1/2/4 tile × light/dark
   make-tray-icon.js   sinh tray.png + tray@2x.png (template image cho menu bar)

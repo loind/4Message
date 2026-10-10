@@ -105,6 +105,138 @@ assert.strictEqual(railVisible(2, false), true)
 assert.strictEqual(railVisible(2, true), false)
 assert.strictEqual(railVisible(1, true), false)
 
+const {
+  COPY_LABEL, SAVE_LABEL, MIN_IMAGE_SIDE, shouldShowImageMenu, canSaveImage, imageMenuTemplate,
+  suggestedFilename, imageUnderPoint, liftCoversAt,
+} = require('./image-menu')
+
+// Menu chỉ dựng khi chính Chromium xác nhận chỗ bấm là ảnh CÓ nội dung — hit-test thật,
+// không đoán từ DOM.
+assert.ok(shouldShowImageMenu({ hasImageContents: true, srcURL: 'https://x/a.jpg' }))
+assert.ok(!shouldShowImageMenu({ hasImageContents: false, srcURL: 'https://x/a.jpg' }))
+// srcURL rỗng thì cả hai mục đều vô nghĩa.
+assert.ok(!shouldShowImageMenu({ hasImageContents: true, srcURL: '' }))
+assert.ok(!shouldShowImageMenu({}))
+assert.ok(!shouldShowImageMenu(null))
+
+// blob: chỉ có nghĩa trong renderer đã tạo nó — main gọi downloadURL sẽ im lặng không ra file.
+assert.ok(!canSaveImage('blob:https://www.messenger.com/8f1e-0000'))
+assert.ok(canSaveImage('https://scontent.xx.fbcdn.net/v/t1/1_2_3_n.jpg'))
+assert.ok(canSaveImage('data:image/png;base64,iVBORw0KGgo='))
+assert.ok(!canSaveImage('file:///etc/passwd'))
+assert.ok(!canSaveImage(''))
+assert.ok(!canSaveImage(undefined))
+
+// Menu LUÔN 2 mục, kể cả blob: — mục save DISABLE chứ không biến mất. Mục bấm được rồi im
+// lặng không có gì xảy ra mới là thứ không ai lần ra được nguyên nhân.
+const blobMenu = imageMenuTemplate({ srcURL: 'blob:https://x/1' })
+assert.deepStrictEqual(blobMenu.map(i => i.label), [COPY_LABEL, SAVE_LABEL])
+assert.strictEqual(blobMenu[1].enabled, false)
+assert.strictEqual(imageMenuTemplate({ srcURL: 'https://x/a.jpg' })[1].enabled, true)
+// Handler nối đúng mục — đảo hai cái là bug im lặng, menu vẫn hiện đủ 2 dòng.
+let copied = 0
+let saved = 0
+const wired = imageMenuTemplate({ srcURL: 'https://x/a.jpg' }, { onCopy: () => copied++, onSave: () => saved++ })
+wired[0].click()
+wired[1].click()
+assert.deepStrictEqual([copied, saved], [1, 1])
+
+// Query của fbcdn dài và chứa cả `/` — phải cắt query TRƯỚC khi tách segment, không thì tên
+// file thành một mảnh query.
+assert.strictEqual(suggestedFilename('123_456_n.jpg?stp=dst-jpg_p526x296/x&_nc_cat=1'), '123_456_n.jpg')
+assert.strictEqual(suggestedFilename('https://scontent.xx.fbcdn.net/v/t1.15752-9/a.png'), 'a.png')
+// Không đuôi → suy từ mime. Đoán .jpg cho ảnh PNG là bug không ai nghi tới cái tên file.
+assert.strictEqual(suggestedFilename('abc123', 'image/png'), 'abc123.png')
+assert.strictEqual(suggestedFilename('abc123', 'image/jpeg'), 'abc123.jpg')
+assert.strictEqual(suggestedFilename('abc123', 'image/webp; charset=binary'), 'abc123.webp')
+// Định dạng bảng chưa biết vẫn suy được từ subtype.
+assert.strictEqual(suggestedFilename('abc123', 'image/jxl'), 'abc123.jxl')
+// Không đuôi và không suy được mime thì GIỮ NGUYÊN, KHÔNG đoán.
+assert.strictEqual(suggestedFilename('abc123'), 'abc123')
+assert.strictEqual(suggestedFilename('abc123', 'application/octet-stream'), 'abc123')
+// Có đuôi rồi thì mime không được đè lên.
+assert.strictEqual(suggestedFilename('a.gif', 'image/png'), 'a.gif')
+// data: URL không mang tên file, mà payload base64 đầy `/` nên tách segment ra rác base64.
+assert.strictEqual(suggestedFilename('data:image/png;base64,iVBORw0KGgo/AAAA', 'image/png'), 'image.png')
+assert.strictEqual(suggestedFilename('', 'image/webp'), 'image.webp')
+assert.strictEqual(suggestedFilename(''), 'image')
+assert.strictEqual(suggestedFilename(null), 'image')
+// `/` là ký tự cấm; `%2F` decode xong lại thành nó, nên phải dọn SAU khi decode.
+assert.strictEqual(suggestedFilename('a%2Fb.jpg'), 'a_b.jpg')
+// `:` bị Finder hiển thị thành `/`.
+assert.ok(!suggestedFilename('x%3Ay.jpg').includes(':'))
+// Allowlist theo \p{L} chứ không phải \w — tên tiếng Việt phải còn nguyên cả dấu lẫn dấu cách.
+assert.strictEqual(suggestedFilename('ảnh nhóm.jpg'), 'ảnh nhóm.jpg')
+// `.hidden` là tên file ẩn, không phải đuôi file.
+assert.strictEqual(suggestedFilename('.hidden', 'image/png'), '.hidden.png')
+
+// --- Tìm ảnh dưới con trỏ, kể cả khi bị phủ ---
+
+/** DOM giả đủ dùng cho imageUnderPoint/liftCoversAt — không cần Electron, không cần trang. */
+// `style.pointerEvents` trả CHUỖI RỖNG khi element không có inline style — không phải
+// undefined. Mô hình sai chỗ này thì test khôi phục sẽ pass với giá trị `undefined`, mà gán
+// `undefined` vào style thật lại ra chuỗi "undefined" và khoá luôn pointer-events.
+const el = (tagName, w, h, src) => ({
+  tagName,
+  currentSrc: src,
+  style: { pointerEvents: '' },
+  getBoundingClientRect: () => ({ width: w, height: h }),
+})
+const docOf = (...stack) => ({ elementsFromPoint: () => stack })
+
+// Ca thường: ảnh ở trên cùng.
+assert.strictEqual(imageUnderPoint(docOf(el('IMG', 74, 74, 'https://x/a.webp')), 1, 1, MIN_IMAGE_SIDE), 'https://x/a.webp')
+// Ca THẬT của Meta: ảnh nằm tận đáy chồng element (đo 2026-08-25, Instagram: 5 DIV phủ lên).
+assert.strictEqual(
+  imageUnderPoint(docOf(el('DIV', 9, 9), el('DIV', 9, 9), el('DIV', 9, 9), el('IMG', 74, 74, 'https://x/b.webp')), 1, 1, MIN_IMAGE_SIDE),
+  'https://x/b.webp')
+// Không có ảnh nào → null, để menu không hiện và trang tự xử.
+assert.strictEqual(imageUnderPoint(docOf(el('DIV', 50, 50), el('SPAN', 50, 50)), 1, 1, MIN_IMAGE_SIDE), null)
+assert.strictEqual(imageUnderPoint(docOf(), 1, 1, MIN_IMAGE_SIDE), null)
+// Pixel theo dõi 1×1 và spacer nhỏ không được tính là ảnh người dùng trỏ vào.
+assert.strictEqual(imageUnderPoint(docOf(el('IMG', 1, 1, 'https://x/track.gif')), 1, 1, MIN_IMAGE_SIDE), null)
+// Ảnh nhỏ đứng trước không được che mất ảnh thật đứng sau.
+assert.strictEqual(
+  imageUnderPoint(docOf(el('IMG', 1, 1, 'https://x/track.gif'), el('IMG', 200, 200, 'https://x/real.jpg')), 1, 1, MIN_IMAGE_SIDE),
+  'https://x/real.jpg')
+// <img> chưa có src (placeholder lazy-load) không được che mất ảnh thật nằm sâu hơn.
+assert.strictEqual(
+  imageUnderPoint(docOf(el('IMG', 200, 200, undefined), el('IMG', 200, 200, 'https://x/real.jpg')), 1, 1, MIN_IMAGE_SIDE),
+  'https://x/real.jpg')
+
+// Nhấc lớp phủ: chỉ đụng element NẰM TRÊN ảnh, và trả lại đúng giá trị cũ (kể cả giá trị
+// trang tự đặt sẵn) — ghi đè vĩnh viễn pointer-events của trang là phá layout người khác.
+const cover1 = el('DIV', 50, 50)
+const cover2 = el('DIV', 50, 50)
+cover2.style.pointerEvents = 'auto'
+const pic = el('IMG', 200, 200, 'https://x/c.jpg')
+const under = el('DIV', 50, 50)
+const doc = docOf(cover1, cover2, pic, under)
+assert.strictEqual(liftCoversAt(doc, 1, 1), true)
+assert.strictEqual(cover1.style.pointerEvents, 'none')
+assert.strictEqual(cover2.style.pointerEvents, 'none')
+// Element DƯỚI ảnh không liên quan, không được đụng tới.
+assert.strictEqual(under.style.pointerEvents, '')
+doc.__fbmessRestoreCovers()
+assert.strictEqual(cover1.style.pointerEvents, '')
+assert.strictEqual(cover2.style.pointerEvents, 'auto')
+// Ảnh đã ở trên cùng thì không có gì để nhấc — main dùng giá trị này để bỏ qua bước khôi phục.
+assert.strictEqual(liftCoversAt(docOf(el('IMG', 200, 200, 'https://x/d.jpg')), 1, 1), false)
+assert.strictEqual(liftCoversAt(docOf(el('DIV', 50, 50)), 1, 1), false)
+
+// CỔNG CHẶN: hai hàm trên chạy ở HAI nơi — gọi trực tiếp trong preload, và serialize bằng
+// toString() để chạy trong trang qua executeJavaScript. Tham chiếu ra module scope sẽ
+// `undefined` ở nơi thứ hai và hỏng IM LẶNG (menu không bao giờ hiện trên ảnh bị phủ, không
+// có lỗi nào in ra). Danh sách dưới đây là mọi tên ở module scope của image-menu.js.
+for (const fn of [imageUnderPoint, liftCoversAt]) {
+  const src = fn.toString()
+  for (const name of ['MIN_IMAGE_SIDE', 'SAVABLE_PROTOCOLS', 'MIME_EXT', 'COPY_LABEL',
+    'SAVE_LABEL', 'RESTORE_JS', 'baseName', 'extFromMime', 'hasExtension', 'canSaveImage']) {
+    assert.ok(!new RegExp('\\b' + name + '\\b').test(src),
+      `${fn.name} phải tự chứa: đang tham chiếu ${name} ở module scope, sẽ undefined khi chạy trong trang`)
+  }
+}
+
 const os = require('os')
 const fs = require('fs')
 const path = require('path')

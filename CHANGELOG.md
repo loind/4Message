@@ -4,6 +4,51 @@ Mỗi bản phát hành là một GitHub Release `electron-b<số build>`, số 
 (`git rev-list --count HEAD`). `release-electron.sh` lấy mục trên cùng của file này làm
 release notes, nên **viết mục mới trước khi release**.
 
+## b75 — 2026-10-10
+
+### Thêm
+
+- **Chuột phải vào ảnh → Copy ảnh / Lưu ảnh…** Hoạt động ở cả bốn kênh. Copy đưa bitmap vào
+  clipboard, ⌘V dán được sang Notes/Preview/Slack; Lưu mở Save panel, mặc định `~/Downloads`
+  với tên file đã chuẩn hoá theo mime. Chuột phải chỗ không phải ảnh thì app không chen vào,
+  trang tự xử như cũ.
+
+  Electron **không** tự dựng context menu như Chrome — nó chỉ phát event rồi để app quyết,
+  nên trước đây chuột phải vào ảnh trong chat không ra gì.
+
+  Ảnh trong Messenger/Instagram/Threads thường bị element khác phủ lên, làm Chromium trả
+  `hasImageContents = false`. App dò `elementsFromPoint` tìm `<img>`, và lúc copy thì tạm
+  tắt `pointer-events` của lớp phủ để hit-test của `copyImageAt` chạm được tới ảnh. Hai
+  đường khác đều đã đo và đều chết: `nativeImage` không decode webp/gif (Meta serve webp là
+  chính), còn vẽ ra canvas thì `toDataURL` ném `SecurityError` vì ảnh CDN không có CORS.
+  Số đo đầy đủ: `plans/2026-08-24-copy-image/design.md`.
+
+- **Probe mới `--probe-image`** — 15 assert cho cơ chế menu ảnh, gồm cả ca ảnh bị lớp phủ
+  che: copy phải ra bitmap đúng kích thước trong clipboard, và `pointer-events` phải được
+  trả lại. Nằm ngoài ràng buộc thứ tự của ba probe kia vì không đụng `prefs.json`.
+
+### Sửa
+
+- **`--probe-image` không còn FAIL oan trên máy chưa đăng nhập.** Khối assert chạy trên
+  view riêng ghim vào trang tĩnh thay vì mượn view của kênh. Máy chưa login thì Messenger
+  nhảy redirect liên tục (`login.php` → `index.php` → …); mỗi lần điều hướng là một renderer
+  mới, nên `<img>` vừa chèn biến mất và `sendInputEvent` bắn vào widget đã chết — không
+  event `context-menu` nào tới nơi và **11 assert FAIL cùng lúc**, đọc y hệt một lỗi tính
+  năng thật.
+
+  Đo 2026-10-10 trên máy chưa đăng nhập: trước 11 FAIL, sau 15/15 PASS, không đổi một dòng
+  code tính năng nào. Positive control đã chạy — phá `SAVABLE_PROTOCOLS` và phá luật
+  `minSide` thì `selftest.js` fail đúng chỗ, nên bộ kiểm không phải loại "báo sạch vì không
+  kiểm gì".
+
+  View probe dựng qua `makeServiceView` chứ không `new WebContentsView` tay: handler
+  `wc.on('context-menu')` — thứ đang được kiểm — nằm trong đó.
+
+### Ghi chú
+
+- `--probe-image` chạy trên `userData` **thật** (cần session đăng nhập mới đo được ảnh chat
+  thật), nên **thoát app trước khi chạy**. Nó cướp focus và **ghi đè clipboard**.
+
 ## b74 — 2026-08-08
 
 ### Sửa

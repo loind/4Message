@@ -14,6 +14,7 @@ khoá tài khoản. Đánh đổi: memory là của web app, không sửa đư�
 | `docs/perf-process.md` | Quy trình đo hiệu năng + các hướng tối ưu đã thử và thất bại |
 | `docs/decisions/` | Quyết định kiến trúc kèm số liệu |
 | `plans/` | Brainstorm và kế hoạch từng tính năng, kèm số đo tại thời điểm quyết |
+| `plans/2026-08-24-copy-image/design.md` | Thiết kế menu chuột phải trên ảnh, kèm số đo |
 
 ## Build
 
@@ -106,9 +107,29 @@ cert thì chỉ cần thêm bước vào `release-electron.sh`.
 | `⌘R` | Tải lại |
 | `⌘W` / nút đóng | **Ẩn** cửa sổ, app vẫn chạy → lần sau mở tức thì |
 | `⌘Q` | Thoát thật |
+| Chuột phải vào ảnh | Menu **Copy ảnh** / **Lưu ảnh…**. Lưu thì hiện hộp thoại chọn nơi lưu, mặc định `~/Downloads` |
 | Badge Dock + số cạnh icon menu bar | Tổng tin chưa đọc của các kênh đang bật |
 
 Đăng nhập một lần, session lưu ở `~/Library/Application Support/4Message/`.
+
+## Copy / lưu ảnh
+
+Electron **không** tự dựng context menu như Chrome — nó chỉ phát event rồi để app quyết. App
+dựng menu 2 mục khi có ảnh dưới con trỏ; chỗ không phải ảnh thì không hiện gì, trang tự xử.
+
+Ảnh trong Messenger/Instagram/Threads thường bị element khác **phủ lên**, làm Chromium trả
+`hasImageContents = false` và không nhận ra đó là ảnh. App xử lý ca đó bằng cách dò
+`elementsFromPoint` tìm `<img>`, rồi lúc copy thì tạm tắt `pointer-events` của lớp phủ để
+hit-test của `copyImageAt` chạm được tới ảnh.
+
+Vì sao không tự tải bytes ảnh về rồi ghi clipboard — hai đường đó đều đã đo và đều chết:
+
+| Đường | Vì sao chết |
+| --- | --- |
+| `net.fetch` + `nativeImage.createFromBuffer` | `nativeImage` **không decode webp/gif**, mà Meta serve webp là chính |
+| Vẽ `<img>` ra canvas rồi `toDataURL` | Canvas bị taint vì ảnh CDN không có CORS header → `SecurityError` |
+
+Toàn bộ số đo: `plans/2026-08-24-copy-image/design.md`.
 
 ## Bật/tắt kênh
 
@@ -164,11 +185,26 @@ node electron/selftest.js                                # logic thuần, là c�
 ./4Message.app/Contents/MacOS/4Message --probe           # rail, link policy, tray icon
 ./4Message.app/Contents/MacOS/4Message --probe-toggle    # bật/tắt kênh, process chết thật
 ./4Message.app/Contents/MacOS/4Message --probe-prefs     # trạng thái đọc lại được
+./4Message.app/Contents/MacOS/4Message --probe-image     # menu chuột phải trên ảnh
 ```
 
 **Thứ tự bắt buộc** là `--probe` → `--probe-toggle` → `--probe-prefs`, liên tiếp. Chèn
 `--probe` vào giữa hai lệnh cuối sẽ reset `prefs.json` và làm `--probe-prefs` fail oan, đọc
 y hệt một lỗi persistence thật.
+
+`--probe-image` **nằm ngoài ràng buộc thứ tự đó** — nó không đọc cũng không ghi `prefs.json`
+nên chạy lúc nào cũng được. Ba lưu ý khi chạy nó:
+
+- Chạy trên `userData` **thật**, không phải thư mục tạm như ba mode kia. Cố ý: nửa giá trị
+  nhất của nó là đo ảnh chat thật, mà ảnh chat chỉ có khi đã đăng nhập. Nó chỉ đọc, không ghi
+  `prefs.json`. **Thoát app đang chạy trước** để tránh hai instance khoá cùng một profile.
+- Cướp focus (`app.focus({steal: true})`) vì `sendInputEvent` chỉ tới nơi khi cửa sổ đang
+  focused. Đừng gõ phím trong lúc nó chạy.
+- **Ghi đè clipboard**: một assert kiểm copy ra tận bitmap trong clipboard.
+
+Nó in hai phần tách bạch: **assert** (cơ chế Chromium → Electron, không cần login, exit code
+phụ thuộc phần này) và **báo cáo** (chuột phải vào ảnh thật của từng kênh — chỉ có nghĩa khi
+đã đăng nhập, không assert). Xem `plans/2026-08-24-copy-image/design.md` để biết vì sao tách.
 
 Exit code là cổng, không phải dòng log. Mọi probe đi qua `runProbe` nên throw cũng thành
 `FAIL probe throw` + exit 1 chứ không treo.
@@ -231,10 +267,13 @@ Chi tiết quyết định: `plans/2026-08-06-icon-4-dots/design.md`.
 2. **Kênh tắt không báo tin.** Hệ quả trực tiếp của việc hủy view để trả RAM.
 3. **Badge Instagram/Threads/Zalo đọc `document.title`** — có thể không phản ánh đúng số DM.
    Zalo đặc biệt chưa kiểm chứng được title có mang số hay không.
-4. **Notification khi app ẩn lâu chưa xác minh trên máy dùng thật.** Quyền đã gate theo
+4. **`--probe-toggle` FAIL 1 assert**: `process kênh đã tắt còn sống: ["zalo"]`. Process
+   renderer của Zalo không chết sau `webContents.close()`. Lỗi có sẵn, đã kiểm chứng độc lập
+   với tính năng ảnh (bỏ `zalo` khỏi `FBMESS_SERVICES` thì PASS). Chưa sửa.
+5. **Notification khi app ẩn lâu chưa xác minh trên máy dùng thật.** Quyền đã gate theo
    origin; nếu vỡ thì log `quyền BỊ TỪ CHỐI:` sẽ chỉ ra lý do.
-5. `⌘⇧M` có thể trùng hotkey app khác.
-6. Voice/video call chưa kiểm tra thực tế.
+6. `⌘⇧M` có thể trùng hotkey app khác.
+7. Voice/video call chưa kiểm tra thực tế.
 
 ## Vì sao Electron chứ không phải WKWebView
 
@@ -265,7 +304,7 @@ Chi tiết quyết định và số liệu: `plans/2026-08-04-engine-decision/br
 ## Cấu trúc
 
 ```
-electron/            app: main.js, services.js, prefs.js, rail.html, preload, selftest
+electron/            app: main.js, services.js, image-menu.js, prefs.js, rail.html, preload, selftest
 tools/               make-icon.swift, icon-balance.swift (+ script dựng phương án icon)
 Resources/           AppIcon.icns
 docs/                ui-discipline, perf-process, decisions/

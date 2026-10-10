@@ -7,7 +7,7 @@
 
 const {
   app, BrowserWindow, WebContentsView, Tray, Menu, globalShortcut, shell, session,
-  nativeImage, ipcMain,
+  nativeImage, ipcMain, clipboard,
 } = require('electron')
 const path = require('path')
 const fs = require('fs')
@@ -15,6 +15,11 @@ const {
   SERVICES, isInternal, isSurface, resolveServices, unreadFromTitle, messengerUnread,
   resolveEnabled, railVisible,
 } = require('./services')
+const {
+  COPY_LABEL, SAVE_LABEL, MIN_IMAGE_SIDE, RESTORE_JS,
+  shouldShowImageMenu, imageMenuTemplate, suggestedFilename,
+  imageUnderPoint, liftCoversAt,
+} = require('./image-menu')
 const { loadPrefs, savePrefs } = require('./prefs')
 
 const RAIL_WIDTH = 68
@@ -22,9 +27,20 @@ const services = resolveServices(process.env.FBMESS_SERVICES)
 const keepChrome = process.env.FBMESS_KEEP_FB_CHROME === '1'
 const probe = process.argv.includes('--probe')
 const probeToggle = process.argv.includes('--probe-toggle')
-// Probe không được đụng userData thật: persist() ghi prefs.json, chạy test mà thiếu dòng
-// này từng âm thầm ghi đè lựa chọn kênh thật của user. Cùng thư mục cố định cho mọi probe
-// flag — --probe-prefs (Task 6) phải đọc lại đúng cái --probe-toggle vừa ghi.
+const probeImage = process.argv.includes('--probe-image')
+// Probe GHI prefs không được đụng userData thật: persist() ghi prefs.json, chạy test mà
+// thiếu dòng này từng âm thầm ghi đè lựa chọn kênh thật của user. Cùng thư mục cố định cho
+// cả ba — --probe-prefs (Task 6) phải đọc lại đúng cái --probe-toggle vừa ghi.
+//
+// --probe-image CỐ TÌNH KHÔNG có ở đây: nó phải chạy trên userData THẬT.
+//
+// Nửa giá trị nhất của mode đó là đo chuột phải trên ảnh CHAT thật, mà ảnh chat chỉ tồn tại
+// khi đã đăng nhập — session đăng nhập nằm trong userData thật. Ném nó sang thư mục tạm thì
+// mọi lần đo đều rơi vào trang login, và kết luận "ảnh bị phủ" rút ra từ đó nói về trang
+// login chứ không về khung chat.
+//
+// An toàn vì mode này CHỈ ĐỌC: không gọi persist(), không savePrefs(). Xem README về việc
+// phải thoát app đang chạy trước, tránh hai instance cùng khoá một profile Chromium.
 if (probe || probeToggle || process.argv.includes('--probe-prefs')) {
   const probeDir = path.join(app.getPath('temp'), 'fbmess-probe')
   app.setPath('userData', probeDir)
@@ -48,10 +64,17 @@ if (probe || probeToggle || process.argv.includes('--probe-prefs')) {
     // đây còn chưa kịp định nghĩa), Electron treo với dialog "App threw an error during load"
     // trong môi trường headless không ai bấm tắt được.
     fs.mkdirSync(probeDir, { recursive: true })
-    savePrefs(probeDir, { enabled: outsideUniverse(loadPrefs(probeDir).enabled), railCollapsed: false })
+    // Reset thì chỉ hai mode kia — xem comment ở đầu khối về --probe-image.
+    if (probe || probeToggle) {
+      savePrefs(probeDir, { enabled: outsideUniverse(loadPrefs(probeDir).enabled), railCollapsed: false })
+    }
   }
 }
 const probeOpened = []
+/** Menu ảnh mà --probe-image ghi lại thay vì popup. @type {{service: string, srcURL: string, labels: string[], enabled: boolean[]}[]} */
+const probeMenus = []
+/** Mọi event context-menu --probe-image nhận được, KỂ CẢ cái bị shouldShowImageMenu loại. */
+const probeRaw = []
 
 let probeFailed = 0
 
@@ -238,6 +261,38 @@ function updateBadge () {
   if (win && rt) win.setTitle(rt.service.title + (rt.unread ? `  (${rt.unread})` : ''))
 }
 
+/**
+ * Copy ảnh vào clipboard.
+ *
+ * `native === true`: Chromium đã nhận ra ảnh, copyImageAt chạy thẳng.
+ *
+ * `native === false`: ảnh bị lớp phủ che. Nhấc pointer-events của lớp phủ → copyImageAt →
+ * trả lại. Đo 2026-08-25: cách này khôi phục hit-test trong CẢ BỐN kiểu lớp phủ chặn được
+ * (nền đặc, opacity:0, canvas, và nền đặc có text).
+ *
+ * KHÔNG dùng net.fetch + nativeImage: nativeImage không decode webp/gif, mà Meta serve webp
+ * là chính. KHÔNG dùng canvas.toDataURL: canvas bị taint vì ảnh CDN không có CORS header.
+ * Cả hai đều đã đo và đều chết, xem design doc.
+ */
+async function copyImageAtPoint (wc, x, y, native) {
+  if (native) { wc.copyImageAt(x, y); return }
+  let lifted = false
+  try {
+    lifted = await wc.executeJavaScript(`(${liftCoversAt})(document, ${x}, ${y})`)
+    wc.copyImageAt(x, y)
+    // Hit-test của copyImageAt chạy TRONG renderer và không đồng bộ với lời gọi này. Trả
+    // pointer-events lại ngay lập tức là đua với chính nó — ảnh vừa lộ ra đã bị che lại
+    // trước khi hit-test kịp chạm tới, và Copy im lặng không có gì. Chờ một nhịp.
+    await new Promise(r => setTimeout(r, 400))
+  } catch (e) {
+    console.warn(`copy ảnh lỗi: ${(e && e.message) || e}`)
+  } finally {
+    // Bắt buộc chạy kể cả khi trên có throw: bỏ sót là để lại vùng chat không bấm được cho
+    // tới lúc reload. liftCoversAt còn một setTimeout backstop nữa cho ca main chết hẳn.
+    if (lifted) wc.executeJavaScript(RESTORE_JS).catch(() => {})
+  }
+}
+
 function makeServiceView (service) {
   const view = new WebContentsView({
     webPreferences: {
@@ -295,6 +350,55 @@ function makeServiceView (service) {
     if (isInternal(url)) return
     e.preventDefault()
     shell.openExternal(url)
+  })
+
+  // Chuột phải vào ảnh → Copy ảnh / Lưu ảnh. Electron KHÔNG tự dựng context menu như Chrome:
+  // nó chỉ phát event rồi để app quyết, nên thiếu handler này thì chuột phải không ra gì.
+  //
+  // `copyImageAt` nhận toạ độ thẳng từ `params` nên không phải quy đổi qua zoom factor —
+  // đó là lý do giữ trigger ở main thay vì gửi clientX/clientY từ preload qua IPC.
+  wc.on('context-menu', async (_e, params) => {
+    // Ghi TRƯỚC mọi cổng lọc: khi menu không hiện, thứ cần biết là Chromium đã trả về gì.
+    // Không có dòng này thì "không ra menu" chỉ là một sự im lặng, không tra được.
+    if (probeImage) {
+      probeRaw.push({
+        service: service.id,
+        mediaType: params.mediaType,
+        hasImageContents: params.hasImageContents,
+        srcURL: (params.srcURL || '').slice(0, 60),
+      })
+    }
+
+    // Hai đường tới cùng một menu:
+    //   native — Chromium tự nhận ra ảnh. Copy dùng thẳng copyImageAt.
+    //   fallback — ảnh bị lớp phủ che (Meta làm suốt), phải hỏi DOM và nhấc lớp phủ lúc copy.
+    // Xem bảng đo "cái gì chặn hit-test" trong plans/2026-08-24-copy-image/design.md.
+    const native = shouldShowImageMenu(params)
+    const srcURL = native
+      ? params.srcURL
+      : await wc.executeJavaScript(
+        `(${imageUnderPoint})(document, ${params.x}, ${params.y}, ${MIN_IMAGE_SIDE})`
+      ).catch(() => null)
+    if (!srcURL) return
+
+    const template = imageMenuTemplate({ srcURL }, {
+      onCopy: () => copyImageAtPoint(wc, params.x, params.y, native),
+      onSave: () => wc.downloadURL(srcURL),
+    })
+    // popup() cần GUI session: trên máy build nó CHẶN process nên test treo thay vì fail, mà
+    // treo tệ hơn fail — CI đứng mãi không ai biết vì sao. Probe chỉ ghi lại rồi return.
+    if (probeImage) {
+      probeMenus.push({
+        service: service.id,
+        srcURL,
+        native,
+        copy: template[0].click,
+        labels: template.map(i => i.label),
+        enabled: template.map(i => i.enabled !== false),
+      })
+      return
+    }
+    Menu.buildFromTemplate(template).popup({ window: win })
   })
 
   wc.loadURL(service.url)
@@ -429,7 +533,8 @@ app.whenReady().then(() => {
   // Gate theo ORIGIN, không chỉ theo loại quyền: partition này chỉ nên có content của Meta
   // và Zalo, nhưng một redirect hay iframe đưa host lạ vào đó thì nó cũng xin được
   // camera/mic. Fail-closed — origin không đọc được thì từ chối.
-  session.fromPartition('persist:fbmess').setPermissionRequestHandler((_wc, permission, cb, details) => {
+  const ses = session.fromPartition('persist:fbmess')
+  ses.setPermissionRequestHandler((_wc, permission, cb, details) => {
     const wanted = permission === 'notifications' || permission === 'media'
     const origin = (details && (details.requestingUrl || details.securityOrigin)) || ''
     const ok = wanted && isInternal(origin)
@@ -437,6 +542,24 @@ app.whenReady().then(() => {
     // mà đó là tính năng cốt lõi của app. Có dòng log này thì còn tra được.
     if (wanted && !ok) console.warn(`quyền BỊ TỪ CHỐI: ${permission} từ ${origin || '(không rõ origin)'}`)
     cb(ok)
+  })
+
+  // "Lưu ảnh…": Electron chỉ hiện Save panel khi savePath CHƯA set — chỗ này không set nó,
+  // chỉ đặt thư mục và tên file mặc định. downloadURL chạy trong đúng session này nên cookie
+  // fbcdn/zdn đi kèm sẵn; đó là lý do không tự tải bytes bằng net.request.
+  //
+  // Áp cho MỌI download của session, không lọc theo URL: app hiện không có đường download
+  // nào khác nên không có gì để lọc, và nếu sau này có thì "vào Downloads, tên đã chuẩn hoá"
+  // vẫn là hành vi muốn có. Ghi ra đây để lần sau khỏi tưởng là thiếu guard.
+  ses.on('will-download', (e, item) => {
+    // Save panel là modal — ở probe nó treo test chứ không fail. Huỷ luôn download.
+    if (probeImage || probe) { e.preventDefault(); return }
+    item.setSaveDialogOptions({
+      defaultPath: path.join(
+        app.getPath('downloads'),
+        suggestedFilename(item.getFilename(), item.getMimeType())
+      ),
+    })
   })
 
   // Rail gửi vị trí tile; đổi ngay sang id vì index chỉ đúng tại thời điểm render.
@@ -609,6 +732,243 @@ app.whenReady().then(() => {
     check('railCollapsed=true trước khi ghi prefs', railCollapsed, true)
 
     persist()
+  })
+
+  // Menu ảnh. Tách ASSERT khỏi BÁO CÁO là cố ý:
+  //
+  //   - Cơ chế Chromium → Electron (chuột phải ra params.hasImageContents, preload bịt được
+  //     menu của trang) là deterministic, không cần login → assert được, chạy trên máy build.
+  //   - Messenger/Zalo có phủ <div> trong suốt lên ảnh chat hay không thì CHỈ máy đã login
+  //     mới trả lời được. Biến nó thành assert là để probe fail oan trên máy build — đúng cái
+  //     bẫy đã ghi ở checkChrome(): cảnh báo luôn sai thì người ta quen bỏ qua cảnh báo thật.
+  //
+  // Mode này không đọc cũng không ghi prefs nên KHÔNG dính ràng buộc thứ tự của ba mode kia.
+  if (probeImage) runProbe(20000, async () => {
+    const IMG_X = 40, IMG_Y = 40, IMG_W = 240, IMG_H = 180
+    // PNG 1×1 trong suốt. data: URL nên không cần mạng, không cần login, và savable được
+    // (khác blob:) — đủ để assert cả hai mục menu ở trạng thái bật.
+    const PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+    // 100×100 cho ca bị phủ: kích thước clipboard là assert, mà 1×1 thì "không rỗng" gần như
+    // không chứng minh được gì.
+    const PNG100 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGQAAABkCAYAAABw4pVUAAAAPElEQVR42u3OMQEAAAgDoJnc6BpjDyQgd2XAYDAYDAaDwWAwGAwGg8FgMBgMBoPBYDAYDAaDwWAwGAyGjy0Vy1/lWtHZbAAAAABJRU5ErkJggg=='
+
+    /**
+     * Chuột phải thật qua sendInputEvent, KHÔNG phải dispatchEvent.
+     *
+     * Khác hẳn ca link policy ở --probe: chỗ đó preload nghe DOM event nên MouseEvent tổng
+     * hợp là đủ. Event `context-menu` của Electron thì sinh từ đường input thật của browser —
+     * dispatchEvent(new MouseEvent('contextmenu')) không bao giờ chạm tới nó.
+     */
+    const rightClickAt = async (wc, x, y) => {
+      probeMenus.length = 0
+      probeRaw.length = 0
+      await wc.executeJavaScript('window.__probePageSawContextMenu = false').catch(() => {})
+      wc.sendInputEvent({ type: 'mouseDown', x, y, button: 'right', clickCount: 1 })
+      wc.sendInputEvent({ type: 'mouseUp', x, y, button: 'right', clickCount: 1 })
+      await new Promise(r => setTimeout(r, 500))
+      return {
+        menu: probeMenus[probeMenus.length - 1] || null,
+        raw: probeRaw[probeRaw.length - 1] || null,
+        pageSaw: await wc.executeJavaScript('window.__probePageSawContextMenu').catch(() => null),
+      }
+    }
+
+    // --- ASSERT: cơ chế, không cần login ---
+    //
+    // Chạy trên view RIÊNG ghim vào trang tĩnh, KHÔNG dùng view của kênh. Cùng
+    // `webPreferences` với view kênh nên vẫn kiểm đúng cặp preload ↔ main.
+    //
+    // Vì sao không dùng thẳng view kênh: máy CHƯA đăng nhập thì Messenger nhảy redirect liên
+    // tục (login.php → index.php → …). Mỗi lần điều hướng là một renderer mới, nên <img> vừa
+    // chèn biến mất và `sendInputEvent` bắn vào widget đã chết — KHÔNG có event context-menu
+    // nào tới nơi và cả 11 assert FAIL cùng lúc. Đo 2026-10-10: ghim trang tĩnh thì 15/15
+    // PASS, không đổi một dòng code tính năng nào.
+    //
+    // Đây đúng là điều khối này tự nhận: "cơ chế, không cần login". Dính vào trang thật thì
+    // nó phụ thuộc mạng và trạng thái đăng nhập — tức là fail oan trên máy build, đúng cái
+    // bẫy đã ghi ở checkChrome().
+    // Dựng qua `makeServiceView` chứ KHÔNG `new WebContentsView` tay: handler
+    // `wc.on('context-menu')` — thứ đang được kiểm — nằm trong đó. Dựng tay thì preload vẫn
+    // bịt menu của trang mà main không dựng gì thay thế, và mọi assert về menu FAIL vì thiếu
+    // handler chứ không phải vì tính năng hỏng.
+    const probeView = makeServiceView(active().service)
+    win.contentView.addChildView(probeView)
+    probeView.setBounds({ x: 0, y: 0, width: 800, height: 600 })
+    const wc = probeView.webContents
+    await wc.loadURL('data:text/html,<body style="background:#eee"></body>')
+    await wc.executeJavaScript(`(() => {
+      window.__probePageSawContextMenu = false
+      // Listener của TRANG (main world). Preload chặn ở capture phase trên window nên listener
+      // này không được thấy event khi bấm trúng ảnh — đó chính là hợp đồng cần chứng minh.
+      document.addEventListener('contextmenu', () => { window.__probePageSawContextMenu = true })
+      const img = document.createElement('img')
+      img.id = '__probe_img'
+      img.src = ${JSON.stringify(PNG)}
+      img.style.cssText = 'position:fixed;left:${IMG_X}px;top:${IMG_Y}px;width:${IMG_W}px;height:${IMG_H}px;z-index:2147483647'
+      document.body.appendChild(img)
+      const plain = document.createElement('div')
+      plain.id = '__probe_plain'
+      plain.style.cssText = 'position:fixed;left:${IMG_X}px;top:${IMG_Y + IMG_H + 20}px;width:${IMG_W}px;height:80px;z-index:2147483647;background:#808080'
+      document.body.appendChild(plain)
+    })()`)
+    // Ảnh data: decode đồng bộ hay không là chuyện của Blink — chờ một nhịp cho chắc, không
+    // thì hasImageContents về false vì ảnh chưa có nội dung và assert fail oan.
+    await new Promise(r => setTimeout(r, 500))
+
+    const onImage = await rightClickAt(wc, IMG_X + IMG_W / 2, IMG_Y + IMG_H / 2)
+    check('chuột phải vào ảnh: có dựng menu', !!onImage.menu, true)
+    check('menu đúng 2 mục', onImage.menu && onImage.menu.labels, [COPY_LABEL, SAVE_LABEL])
+    check('cả 2 mục bấm được với data: URL', onImage.menu && onImage.menu.enabled, [true, true])
+    // srcURL khớp chứng minh luôn cả không gian toạ độ: sai hệ quy chiếu thì đã bấm ra ngoài
+    // ảnh (rail rộng 68px là mức lệch dễ gặp nhất) và không có menu nào để so.
+    check('menu trỏ đúng ảnh vừa bấm', onImage.menu && onImage.menu.srcURL, PNG)
+    check('trang KHÔNG thấy contextmenu trên ảnh', onImage.pageSaw, false)
+
+    const onPlain = await rightClickAt(wc, IMG_X + IMG_W / 2, IMG_Y + IMG_H + 60)
+    check('chuột phải ngoài ảnh: KHÔNG dựng menu', !!onPlain.menu, false)
+    // Nửa còn lại của hợp đồng "để trang tự xử". Thiếu assert này thì một preload chặn SẠCH
+    // mọi contextmenu vẫn PASS hết các assert trên.
+    check('trang VẪN thấy contextmenu ngoài ảnh', onPlain.pageSaw, true)
+
+    // --- ASSERT 2: ảnh BỊ LỚP PHỦ CHE — đúng ca thật của Meta ---
+    // Lớp phủ nền ĐẶC: đo 2026-08-25 cho thấy nền trong suốt KHÔNG chặn hit-test, chỉ lớp
+    // phủ tự vẽ ra pixel mới chặn. Dùng nền trong suốt ở đây thì test PASS mà không hề chạm
+    // vào đường fallback — tức là không kiểm gì cả.
+    //
+    // Dọn ảnh của ca 1 TRƯỚC: nó nằm cùng toạ độ, nên còn để đó thì imageUnderPoint bắt trúng
+    // nó và cả khối assert dưới đây đo nhầm ảnh (PASS/FAIL đều vô nghĩa).
+    await wc.executeJavaScript(
+      `for (const id of ['__probe_img', '__probe_plain']) { const el = document.getElementById(id); if (el) el.remove() }`
+    ).catch(() => {})
+    await wc.executeJavaScript(`(() => {
+      const img = document.createElement('img')
+      img.id = '__probe_img2'
+      img.src = ${JSON.stringify(PNG100)}
+      img.style.cssText = 'position:fixed;left:${IMG_X}px;top:${IMG_Y}px;width:${IMG_W}px;height:${IMG_H}px;z-index:2147483646'
+      document.body.appendChild(img)
+      const cover = document.createElement('div')
+      cover.id = '__probe_cover'
+      cover.style.cssText = 'position:fixed;left:${IMG_X}px;top:${IMG_Y}px;width:${IMG_W}px;height:${IMG_H}px;z-index:2147483647;background:#123456'
+      document.body.appendChild(cover)
+    })()`)
+    await new Promise(r => setTimeout(r, 500))
+
+    const covered = await rightClickAt(wc, IMG_X + IMG_W / 2, IMG_Y + IMG_H / 2)
+    // Precondition: nếu lớp phủ không thật sự chặn thì mọi assert dưới đây đo đường native,
+    // và đường fallback — thứ cần kiểm — không chạy dòng nào.
+    check('ảnh bị phủ: Chromium KHÔNG tự nhận ra', covered.raw && covered.raw.hasImageContents, false)
+    check('ảnh bị phủ: vẫn dựng được menu', !!covered.menu, true)
+    check('ảnh bị phủ: đi đường fallback', covered.menu && covered.menu.native, false)
+    check('ảnh bị phủ: menu trỏ đúng ảnh', covered.menu && covered.menu.srcURL, PNG100)
+    check('ảnh bị phủ: trang KHÔNG thấy contextmenu', covered.pageSaw, false)
+
+    // Điều kiện MẠNH NHẤT: copy phải ra bitmap thật trong clipboard. Menu hiện đủ 2 mục mà
+    // bấm không ra gì là dạng hỏng khó chịu nhất — nhìn thì thấy tính năng có tồn tại.
+    clipboard.clear()
+    if (covered.menu) await covered.menu.copy()
+    const copied = clipboard.readImage()
+    check('ảnh bị phủ: copy ra bitmap trong clipboard', !copied.isEmpty(), true)
+    check('ảnh bị phủ: đúng kích thước ảnh gốc', copied.isEmpty() ? null : copied.getSize(), { width: 100, height: 100 })
+
+    await new Promise(r => setTimeout(r, 300))
+    // Trả lại pointer-events là bắt buộc: bỏ sót thì vùng chat không bấm được cho tới lúc
+    // reload — hỏng nặng hơn nhiều so với việc copy không chạy.
+    check('ảnh bị phủ: pointer-events đã trả lại',
+      await wc.executeJavaScript(`document.getElementById('__probe_cover').style.pointerEvents`), '')
+
+    await wc.executeJavaScript(
+      `for (const id of ['__probe_img', '__probe_plain', '__probe_img2', '__probe_cover']) { const el = document.getElementById(id); if (el) el.remove() }`
+    ).catch(() => {})
+
+    win.contentView.removeChildView(probeView)
+
+    // --- BÁO CÁO: ảnh thật của trang, cần login mới có ảnh chat ---
+    console.log('--- đo trên ảnh thật (không assert: cần login mới có ảnh chat) ---')
+    console.log(`userData: ${app.getPath('userData')}`)
+    for (const rt of runtimes) {
+      selectId(rt.service.id)
+      const w = rt.view.webContents
+      // sendInputEvent CHỈ tới nơi khi cửa sổ chứa view đang focused (ràng buộc của Electron)
+      // VÀ view vừa chọn là view đang focus trong cửa sổ đó. Chạy probe từ terminal thì
+      // terminal mới là app frontmost, nên phải cướp focus — steal:true.
+      //
+      // Thiếu đoạn này, mọi kênh sau kênh đầu tiên báo "không nhận được event nào": đọc y hệt
+      // một lỗi thật của tính năng, trong khi thực ra là input chưa bao giờ tới nơi.
+      app.focus({ steal: true })
+      win.show()
+      win.focus()
+      w.focus()
+      await new Promise(r => setTimeout(r, 800))
+      const focused = await w.executeJavaScript('document.hasFocus()').catch(() => null)
+      if (!focused) console.log(`[${rt.service.id}] CẢNH BÁO: view không focus được — số đo dưới đây không tin được`)
+      const box = await w.executeJavaScript(`(() => {
+        let best = null
+        for (const el of document.querySelectorAll('img')) {
+          const r = el.getBoundingClientRect()
+          if (r.width < 40 || r.height < 40) continue
+          const cx = r.left + r.width / 2
+          const cy = r.top + r.height / 2
+          // TÂM phải nằm trong viewport, không chỉ mép trên-trái. Ảnh cao thò khỏi mép dưới
+          // có tâm ở ngoài màn: sendInputEvent tới đó là bấm vào hư không, Chromium trả
+          // mediaType=none và số đo đọc thành "ảnh không nhận diện được" — sai hoàn toàn.
+          if (cx < 0 || cy < 0 || cx >= innerWidth || cy >= innerHeight) continue
+          if (!best || r.width * r.height > best.w * best.h) {
+            best = { x: cx, y: cy, w: r.width, h: r.height,
+                     src: (el.currentSrc || el.src || '').slice(0, 70) }
+          }
+        }
+        if (!best) return null
+        // Ai NẰM TRÊN ở đúng toạ độ sắp bấm. Đây là câu trả lời trực tiếp cho giả thuyết
+        // "div trong suốt phủ lên ảnh": hitTag khác IMG nghĩa là chuột phải không bao giờ
+        // chạm tới <img>, và cả preload lẫn hasImageContents đều đúng khi nói "không phải ảnh".
+        const hit = document.elementFromPoint(best.x, best.y)
+        best.hitTag = hit ? hit.tagName : '(không có)'
+        // Cả chồng element tại điểm bấm, theo thứ tự trên→dưới. Nếu <IMG> nằm đâu đó trong
+        // chồng mà không ở trên cùng thì phương án "dò xuống chồng element" trong preload là
+        // đường cứu được ca ảnh bị phủ — đo luôn ở đây để khỏi phải đoán lúc quyết định.
+        const stack = document.elementsFromPoint(best.x, best.y) || []
+        best.stack = stack.slice(0, 8).map(el => el.tagName).join('>')
+        best.imgInStack = stack.some(el => el.tagName === 'IMG')
+        // Ảnh KHÔNG có mặt trong chồng element dù điểm bấm nằm trong rect của nó = nó bị đặt
+        // pointer-events:none. elementsFromPoint bỏ qua những element như vậy, nên luật "dò
+        // chồng element" mù hoàn toàn với ca này.
+        for (const el of document.querySelectorAll('img')) {
+          const r = el.getBoundingClientRect()
+          if (Math.abs(r.left + r.width / 2 - best.x) < 1 && Math.abs(r.top + r.height / 2 - best.y) < 1) {
+            best.imgPointerEvents = getComputedStyle(el).pointerEvents
+            break
+          }
+        }
+        best.complete = (() => {
+          for (const el of document.querySelectorAll('img')) {
+            const r = el.getBoundingClientRect()
+            if (Math.abs(r.left + r.width / 2 - best.x) < 1 && Math.abs(r.top + r.height / 2 - best.y) < 1) {
+              return el.complete && el.naturalWidth > 0
+            }
+          }
+          return null
+        })()
+        return best
+      })()`).catch(() => null)
+      // Chưa login thì mọi số đo bên dưới nói về TRANG LOGIN chứ không về khung chat — mà
+      // câu hỏi cần trả lời là về ảnh chat. In ra để không ai rút kết luận từ nhầm trang.
+      const login = await w.executeJavaScript(
+        '/log in|đăng nhập|mật khẩu|password/i.test(document.body ? document.body.innerText : "")'
+      ).catch(() => null)
+      if (login !== false) console.log(`[${rt.service.id}] CẢNH BÁO: trông như CHƯA đăng nhập (login=${login}) — số đo dưới đây nói về trang login`)
+      if (!box) {
+        console.log(`[${rt.service.id}] không có <img> nào >= 40px với tâm trong viewport`)
+        continue
+      }
+      const hit = await rightClickAt(w, box.x, box.y)
+      const raw = hit.raw
+        ? `mediaType=${hit.raw.mediaType} hasImageContents=${hit.raw.hasImageContents}`
+        : 'KHÔNG nhận được event context-menu nào'
+      console.log(`[${rt.service.id}] ảnh ${Math.round(box.w)}×${Math.round(box.h)} decoded=${box.complete} · img-trong-chồng=${box.imgInStack} pointer-events=${box.imgPointerEvents} · chồng: ${box.stack}`)
+      console.log(`             → menu: ${hit.menu ? 'CÓ' : 'KHÔNG'} · ${raw} · src=${box.src}`)
+    }
+    console.log('Đọc kết quả: <IMG> ở "trên cùng" mà menu vẫn KHÔNG → luật nhận diện sai, sửa code.')
+    console.log('Tag khác IMG → ảnh bị phủ, xem mục Rủi ro trong plans/2026-08-24-copy-image/design.md.')
   })
 
   if (process.argv.includes('--probe-prefs')) runProbe(15000, () => {
